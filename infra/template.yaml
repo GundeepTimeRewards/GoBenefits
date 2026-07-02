@@ -77,6 +77,7 @@ Resources:
       StorageEncrypted: true
       KmsKeyId: !Ref EncryptionKey
       DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds: [!Ref AuroraSecurityGroup]
 
   AuroraInstance:
     Type: AWS::RDS::DBInstance
@@ -96,7 +97,19 @@ Resources:
           SecretArn: !Ref DbSecret
           IAMAuth: DISABLED
       VpcSubnetIds: !Ref PrivateSubnetIds
+      VpcSecurityGroupIds: [!Ref DbProxySecurityGroup]
       RequireTLS: true
+
+  # Associates the proxy with the Aurora cluster (its default target group). Without
+  # this the proxy has no backend to route to. Depends on the instance so the cluster
+  # has an available writer target when the group is created.
+  DbProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    DependsOn: AuroraInstance
+    Properties:
+      DBProxyName: !Ref DbProxy
+      TargetGroupName: default
+      DBClusterIdentifiers: [!Ref AuroraCluster]
 
   DbProxyRole:
     Type: AWS::IAM::Role
@@ -197,11 +210,107 @@ Resources:
     Metadata:
       BuildMethod: makefile
 
+  # ---- Network security groups (reference-based; NO 0.0.0.0/0 on 3306) ------
+  # Path: Lambda SG --3306--> RDS Proxy SG --3306--> Aurora SG. Each tier is reachable
+  # ONLY from the tier in front of it, by security-group reference (not CIDR). Lambda
+  # SG keeps CloudFormation's default allow-all egress (no SecurityGroupEgress block),
+  # which is sufficient to reach the proxy (3306) and the interface endpoints (443).
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: GoBenefits Lambda egress to Aurora/RDS Proxy
+      GroupDescription: GoBenefits Lambda egress to Aurora/RDS Proxy + VPC endpoints
       VpcId: !Ref VpcId
+
+  DbProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Proxy - reachable only from the Lambda SG on 3306
+      VpcId: !Ref VpcId
+
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Aurora - reachable only from the RDS Proxy SG on 3306
+      VpcId: !Ref VpcId
+
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPC interface endpoints - reachable only from the Lambda SG on 443
+      VpcId: !Ref VpcId
+
+  # Ingress rules as standalone resources so the SG references don't create cycles.
+  DbProxyIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  AuroraIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AuroraSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref DbProxySecurityGroup
+
+  VpcEndpointIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VpcEndpointSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  # ---- VPC interface endpoints (private-subnet egress to AWS APIs, no NAT) ---
+  # In-VPC Lambdas need Secrets Manager (DB creds), KMS (decrypt the secret), Logs,
+  # and X-Ray (Tracing: Active). Interface endpoints avoid an always-on NAT Gateway
+  # (~4 endpoints ≈ cost of, and cheaper at low volume than, a NAT). PrivateDnsEnabled
+  # so the SDK's default endpoints resolve to these. Requires VPC DNS support enabled.
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref VpcEndpointSecurityGroup]
+
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.kms"
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref VpcEndpointSecurityGroup]
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref VpcEndpointSecurityGroup]
+
+  XrayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.xray"
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref VpcEndpointSecurityGroup]
 
   # ---- API -----------------------------------------------------------------
   GraphQLApi:

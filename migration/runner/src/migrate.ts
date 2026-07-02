@@ -4,13 +4,17 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getConfig, runMigrations } from "@goben/data-access";
+import { ensureDatabase, getConfig, runMigrations } from "@goben/data-access";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // repo layout: migration/runner/src -> db/migrations/control-plane
 const CONTROL_PLANE_DIR = path.resolve(HERE, "../../../db/migrations/control-plane");
 
 export const handler = async (): Promise<{ applied: string[] }> => {
-  const applied = await runMigrations(getConfig().controlPlaneDb, CONTROL_PLANE_DIR);
+  const db = getConfig().controlPlaneDb;
+  // Aurora has no default database; the control-plane DB must exist before the
+  // migration runner can connect to it. Smallest safe bootstrap (idempotent).
+  await ensureDatabase(db);
+  const applied = await runMigrations(db, CONTROL_PLANE_DIR);
   return { applied };
 };
