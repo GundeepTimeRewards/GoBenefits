@@ -152,3 +152,83 @@ describe("fail closed", () => {
     await expect(invoke("notAField", "sub-platform")).rejects.toThrow("No resolver");
   });
 });
+
+/**
+ * Error-surface mapping for AppSync (Option A). The handler sets the thrown error's
+ * `name` (the channel the Lambda runtime reports as errorType, which the APPSYNC_JS
+ * response handler surfaces via ctx.error.type) and keeps `errorType` for direct
+ * inspection. These assert the type an AppSync client would receive.
+ */
+async function caught(p: Promise<unknown>): Promise<any> {
+  try {
+    await p;
+    throw new Error("expected the call to reject, but it resolved");
+  } catch (e) {
+    return e;
+  }
+}
+
+describe("typed error mapping (AppSync surface)", () => {
+  test("AuthError (cross-tenant) -> Unauthorized", async () => {
+    const e = await caught(invoke("employees", "sub-emp-admin-a", { employerId: EMP_B }));
+    expect(e.name).toBe("Unauthorized");
+    expect(e.errorType).toBe("Unauthorized");
+  });
+
+  test("AuthError (no identity) -> Unauthorized", async () => {
+    const e = await caught(invoke("me", undefined));
+    expect(e.name).toBe("Unauthorized");
+    expect(e.errorType).toBe("Unauthorized");
+  });
+
+  test("ValidationError (missing last name) -> ValidationError", async () => {
+    const e = await caught(
+      invoke("createEmployee", "sub-emp-admin-a", { input: { employerId: EMP_A, firstName: "No", lastName: "" } })
+    );
+    expect(e.name).toBe("ValidationError");
+    expect(e.errorType).toBe("ValidationError");
+  });
+
+  test("success path is unchanged (no error name/type leaks onto results)", async () => {
+    const me: any = await invoke("me", "sub-platform");
+    expect(me.role).toBe("super_admin");
+    expect(me.errorType).toBeUndefined();
+    expect(me.name).toBeUndefined();
+  });
+});
+
+describe("all 14 C1 fields are wired to a resolver branch", () => {
+  // Every C1 field must dispatch to a service (not fall through to the default
+  // "No resolver" case). Args are intentionally minimal — a field may still reject
+  // downstream (e.g. missing employerId -> Unauthorized), but NEVER with "No resolver".
+  const FIELDS: Array<[string, Record<string, any>]> = [
+    ["me", {}],
+    ["myEmployers", {}],
+    ["employer", {}],
+    ["planYears", {}],
+    ["currentPlanYear", {}],
+    ["employerCensusContext", {}],
+    ["employees", {}],
+    ["employeeDetail", {}],
+    ["dependents", {}],
+    ["createEmployee", { input: {} }],
+    ["updateEmployee", { input: {} }],
+    ["addDependent", { input: {} }],
+    ["updateDependent", { input: {} }],
+    ["removeDependent", {}],
+  ];
+
+  test("count is exactly 14 (scope guard)", () => {
+    expect(FIELDS.length).toBe(14);
+  });
+
+  for (const [field, args] of FIELDS) {
+    test(`${field} dispatches (never "No resolver")`, async () => {
+      try {
+        await invoke(field, "sub-platform", args);
+      } catch (e: any) {
+        expect(String(e?.message)).not.toContain("No resolver");
+      }
+    });
+  }
+});

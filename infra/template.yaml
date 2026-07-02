@@ -242,6 +242,19 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt GraphqlResolverFn.Arn
 
+  # --- Phase C (C1) resolvers -----------------------------------------------
+  # All 14 C1 fields use ONE shared APPSYNC_JS pass-through against the single
+  # Lambda data source. The request handler forwards {info, identity, arguments}
+  # to the resolver Lambda (so event.identity.sub + event.arguments +
+  # event.info.fieldName match the handler's AppSyncEvent). The response handler
+  # maps a Lambda error into a typed GraphQL error via ctx.error.type
+  # (Unauthorized / ValidationError; anything else stays a generic error). The
+  # SAME `Code` string is used for every resolver — see PhaseCResolverCode note.
+  #
+  # NOTE: CloudFormation has no YAML-anchor support, so the identical resolver
+  # `Code` is repeated per field. If this list grows, move the code to
+  # `CodeS3Location` (uploaded at build) to DRY it up.
+
   MeResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: GraphQLSchema
@@ -250,6 +263,25 @@ Resources:
       TypeName: Query
       FieldName: me
       DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
 
   MyEmployersResolver:
     Type: AWS::AppSync::Resolver
@@ -259,6 +291,137 @@ Resources:
       TypeName: Query
       FieldName: myEmployers
       DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  EmployerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: employer
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  PlanYearsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: planYears
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  CurrentPlanYearResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: currentPlanYear
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  EmployerCensusContextResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: employerCensusContext
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
 
   EmployeesResolver:
     Type: AWS::AppSync::Resolver
@@ -268,6 +431,221 @@ Resources:
       TypeName: Query
       FieldName: employees
       DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  EmployeeDetailResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: employeeDetail
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  DependentsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: dependents
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  CreateEmployeeResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: createEmployee
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  UpdateEmployeeResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: updateEmployee
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  AddDependentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: addDependent
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  UpdateDependentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: updateDependent
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
+
+  RemoveDependentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: removeDependent
+      DataSourceName: !GetAtt ResolverDataSource.Name
+      Runtime: { Name: APPSYNC_JS, RuntimeVersion: "1.0.0" }
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              info: { fieldName: ctx.info.fieldName, parentTypeName: ctx.info.parentTypeName },
+              identity: ctx.identity,
+              arguments: ctx.args,
+            },
+          };
+        }
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
 
 Outputs:
   GraphQLApiUrl:

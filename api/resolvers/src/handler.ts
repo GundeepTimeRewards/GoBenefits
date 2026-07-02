@@ -35,56 +35,66 @@ export const handler = async (event: AppSyncEvent): Promise<unknown> => {
     throw toGraphqlError(e);
   });
 
+  // `return await` is REQUIRED: dispatch returns a promise, and only awaiting it
+  // inside this try lets the catch see a rejected field resolver. A bare
+  // `return dispatch(...)` would adopt the promise and let its rejection bypass
+  // toGraphqlError entirely (so error typing would silently not apply).
   try {
-    const a = event.arguments ?? {};
-    switch (event.info.fieldName) {
-      // --- Identity & employer selection ---
-      case "me":
-        return me(ctx);
-      case "myEmployers":
-        return myEmployers(ctx);
-      case "employer":
-        return employerService.getEmployer(ctx, a.employerId);
-
-      // --- Plan years ---
-      case "planYears":
-        return employerService.listPlanYears(ctx, a.employerId);
-      case "currentPlanYear":
-        return employerService.currentPlanYear(ctx, a.employerId);
-
-      // --- Census (Module 1) ---
-      case "employees":
-        return {
-          items: await censusService.listEmployees(ctx, a.employerId, { search: a.search, limit: a.limit }),
-          nextToken: null,
-        };
-      case "employerCensusContext":
-        return censusService.employerCensusContext(ctx, a.employerId, a.planYearId);
-      case "createEmployee":
-        // Input already carries `employerId` (Phase B contract) — pass through.
-        return censusService.createEmployee(ctx, a.input);
-      case "updateEmployee":
-        return censusService.updateEmployee(ctx, a.input);
-
-      // --- Employee detail + Dependents (Module 1b) ---
-      case "employeeDetail":
-        return dependentService.employeeDetail(ctx, a.employerId, a.employeeId);
-      case "dependents":
-        return dependentService.listDependents(ctx, a.employerId, a.employeeId);
-      case "addDependent":
-        return dependentService.addDependent(ctx, a.input);
-      case "updateDependent":
-        return dependentService.updateDependent(ctx, a.input);
-      case "removeDependent":
-        return dependentService.removeDependent(ctx, a.employerId, a.dependentId);
-
-      default:
-        throw new Error(`No resolver for field: ${event.info.fieldName}`);
-    }
+    return await dispatch(ctx, event.info.fieldName, event.arguments ?? {});
   } catch (e) {
     throw toGraphqlError(e);
   }
 };
+
+/** Field dispatch. Each case authorizes + routes inside its service (getCustomerDb);
+ *  no auth/SQL/tenant logic here. Kept as its own awaited function so the handler's
+ *  single try/catch reliably maps every field's errors. */
+async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, any>): Promise<unknown> {
+  switch (fieldName) {
+    // --- Identity & employer selection ---
+    case "me":
+      return me(ctx);
+    case "myEmployers":
+      return myEmployers(ctx);
+    case "employer":
+      return employerService.getEmployer(ctx, a.employerId);
+
+    // --- Plan years ---
+    case "planYears":
+      return employerService.listPlanYears(ctx, a.employerId);
+    case "currentPlanYear":
+      return employerService.currentPlanYear(ctx, a.employerId);
+
+    // --- Census (Module 1) ---
+    case "employees":
+      return {
+        items: await censusService.listEmployees(ctx, a.employerId, { search: a.search, limit: a.limit }),
+        nextToken: null,
+      };
+    case "employerCensusContext":
+      return censusService.employerCensusContext(ctx, a.employerId, a.planYearId);
+    case "createEmployee":
+      // Input already carries `employerId` (Phase B contract) — pass through.
+      return censusService.createEmployee(ctx, a.input);
+    case "updateEmployee":
+      return censusService.updateEmployee(ctx, a.input);
+
+    // --- Employee detail + Dependents (Module 1b) ---
+    case "employeeDetail":
+      return dependentService.employeeDetail(ctx, a.employerId, a.employeeId);
+    case "dependents":
+      return dependentService.listDependents(ctx, a.employerId, a.employeeId);
+    case "addDependent":
+      return dependentService.addDependent(ctx, a.input);
+    case "updateDependent":
+      return dependentService.updateDependent(ctx, a.input);
+    case "removeDependent":
+      return dependentService.removeDependent(ctx, a.employerId, a.dependentId);
+
+    default:
+      throw new Error(`No resolver for field: ${fieldName}`);
+  }
+}
 
 /** Identity read model. `role` is mapped to the GraphQL Role enum (fails closed on
  *  an unmapped DB role key); `employerId` is the bound employer for single-employer
@@ -121,9 +131,39 @@ async function myEmployers(ctx: AuthContext) {
   }));
 }
 
+/**
+ * Normalize errors for AppSync. The AWS Lambda runtime reports a thrown error's
+ * `name` as the invocation's `errorType`, and AppSync's APPSYNC_JS response handler
+ * surfaces that via `ctx.error.type` -> `util.error(message, type)`. So we set BOTH
+ * `name` (the channel AppSync actually reads) and `errorType` (kept for direct
+ * inspection / existing callers). Unauthorized and ValidationError become typed
+ * client errors; everything else is an untyped internal error (message preserved,
+ * no leak of internal error class names).
+ */
+function typedError(name: "Unauthorized" | "ValidationError", message: string): Error {
+  return Object.assign(new Error(message), { name, errorType: name });
+}
+
+/**
+ * Classification is by the error's stable `name`, NOT `instanceof`. The deployed
+ * resolver is esbuild-BUNDLED (see infra/template.yaml BuildMethod: esbuild); a
+ * class reachable through more than one import path can be duplicated in the bundle,
+ * which silently breaks cross-module `instanceof` (AuthError from @goben/data-access,
+ * ValidationError from @goben/census). Each domain error sets a distinctive `name`
+ * (AuthError / RoleMappingError / ValidationError), so name matching is
+ * bundling-robust and matches what the Lambda runtime already reports. `instanceof`
+ * is kept as a belt-and-suspenders secondary.
+ */
 function toGraphqlError(e: unknown): Error {
-  if (e instanceof AuthError) return Object.assign(new Error(e.message), { errorType: "Unauthorized" });
-  if (e instanceof RoleMappingError) return Object.assign(new Error(e.message), { errorType: "Unauthorized" });
-  if (e instanceof ValidationError) return Object.assign(new Error(e.message), { errorType: "ValidationError" });
-  return e instanceof Error ? e : new Error(String(e));
+  if (e instanceof Error) {
+    const name = e.name;
+    if (e instanceof AuthError || e instanceof RoleMappingError || name === "AuthError" || name === "RoleMappingError") {
+      return typedError("Unauthorized", e.message);
+    }
+    if (e instanceof ValidationError || name === "ValidationError") {
+      return typedError("ValidationError", e.message);
+    }
+    return e; // untyped internal error — message preserved, no class-name leak
+  }
+  return new Error(String(e));
 }
