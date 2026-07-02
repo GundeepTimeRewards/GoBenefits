@@ -150,43 +150,52 @@ Resources:
         { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
 
   # ---- Compute -------------------------------------------------------------
+  # NOTE: all three functions use `BuildMethod: makefile` (see the repo-root Makefile).
+  # SAM's built-in esbuild builder runs `npm install`, which cannot resolve the local
+  # @goben/* bun-workspace packages (unpublished, "*" -> npm 404). The Makefile bundles
+  # each entry with esbuild instead, inlining the workspace code. CodeUri is the repo
+  # root so the make target runs there and the entrypoints resolve @goben/* + mysql2
+  # against the repo's node_modules; only the built .mjs artifact is packaged.
   GraphqlResolverFn:
     Type: AWS::Serverless::Function
     Properties:
       Handler: handler.handler
-      CodeUri: ../api/resolvers/
+      CodeUri: ../
       VpcConfig:
         SubnetIds: !Ref PrivateSubnetIds
         SecurityGroupIds: [!Ref LambdaSecurityGroup]
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
     Metadata:
-      BuildMethod: esbuild
-      BuildProperties: { Target: es2022, Format: esm, Minify: false, Sourcemap: true }
+      BuildMethod: makefile
 
   DbMigratorFn:
     Type: AWS::Serverless::Function
     Properties:
       Handler: migrate.handler
-      CodeUri: ../migration/runner/
+      CodeUri: ../
       Timeout: 120
       VpcConfig:
         SubnetIds: !Ref PrivateSubnetIds
         SecurityGroupIds: [!Ref LambdaSecurityGroup]
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+    Metadata:
+      BuildMethod: makefile
 
   TenantProvisionerFn:
     Type: AWS::Serverless::Function
     Properties:
       Handler: provision.handler
-      CodeUri: ../migration/runner/
+      CodeUri: ../
       Timeout: 120
       VpcConfig:
         SubnetIds: !Ref PrivateSubnetIds
         SecurityGroupIds: [!Ref LambdaSecurityGroup]
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+    Metadata:
+      BuildMethod: makefile
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
