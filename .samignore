@@ -1,0 +1,9 @@
+# Keep SAM's build-context copy small and symlink-free. The Makefile targets run
+# `bun install` to (re)create node_modules in the build dir, so the host copy is not
+# needed — and copying bun's symlinked store is exactly what breaks transitive
+# resolution. Also exclude VCS and prior build output.
+node_modules/
+.git/
+.aws-sam/
+dist/
+apps/web/dist/
