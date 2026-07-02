@@ -1,0 +1,14 @@
+{
+  "name": "@goben/employer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@goben/data-access": "*",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

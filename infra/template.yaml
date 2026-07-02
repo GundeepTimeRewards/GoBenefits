@@ -1,0 +1,282 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: GoBenefits V4 — Phase 0 foundation (AppSync + Lambda + Aurora MySQL + Cognito)
+
+# ---------------------------------------------------------------------------
+# NOTE: Phase 0 skeleton. Stands up the foundation only — no business modules.
+# Stateful infra (Aurora cluster, RDS Proxy) is sketched; fill VPC/subnet params
+# and security groups for a real deploy. Keep tenant model consistent with the
+# DB design: one shared cluster, database-per-customer, control-plane shared DB.
+# ---------------------------------------------------------------------------
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+    Default: dev
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  DbMinACU:
+    Type: Number
+    Default: 0.5
+  DbMaxACU:
+    Type: Number
+    Default: 4
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 15
+    MemorySize: 512
+    Tracing: Active
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        CONTROL_PLANE_DB: control_plane
+        RDS_PROXY_ENDPOINT: !GetAtt DbProxy.Endpoint
+        DB_SECRET_ARN: !Ref DbSecret
+        EVENT_BUS_NAME: !Ref EventBus
+
+Resources:
+  # ---- Security / config ---------------------------------------------------
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: GoBenefits V4 encryption key
+      EnableKeyRotation: true
+
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "goben-${Env}-db"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"goben_app"}'
+        GenerateStringKey: "password"
+        ExcludePunctuation: true
+        PasswordLength: 32
+
+  # ---- Data tier (shared cluster; database-per-customer) -------------------
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: GoBenefits Aurora subnets
+      SubnetIds: !Ref PrivateSubnetIds
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql
+      EngineMode: provisioned
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref DbMinACU
+        MaxCapacity: !Ref DbMaxACU
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+      StorageEncrypted: true
+      KmsKeyId: !Ref EncryptionKey
+      DBSubnetGroupName: !Ref DbSubnetGroup
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-mysql
+
+  DbProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: !Sub "goben-${Env}-proxy"
+      EngineFamily: MYSQL
+      RoleArn: !GetAtt DbProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !Ref DbSecret
+          IAMAuth: DISABLED
+      VpcSubnetIds: !Ref PrivateSubnetIds
+      RequireTLS: true
+
+  DbProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: rds.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref DbSecret
+
+  # ---- Identity ------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "goben-${Env}"
+      MfaConfiguration: "OPTIONAL"
+      Policies:
+        PasswordPolicy: { MinimumLength: 12, RequireNumbers: true, RequireSymbols: true, RequireUppercase: true }
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+
+  # ---- Eventing (skeleton for later modules) -------------------------------
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "goben-${Env}"
+
+  # ---- Documents -----------------------------------------------------------
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "goben-${Env}-documents-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: aws:kms, KMSMasterKeyID: !Ref EncryptionKey }
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+
+  # ---- Compute -------------------------------------------------------------
+  GraphqlResolverFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handler.handler
+      CodeUri: ../api/resolvers/
+      VpcConfig:
+        SubnetIds: !Ref PrivateSubnetIds
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties: { Target: es2022, Format: esm, Minify: false, Sourcemap: true }
+
+  DbMigratorFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: migrate.handler
+      CodeUri: ../migration/runner/
+      Timeout: 120
+      VpcConfig:
+        SubnetIds: !Ref PrivateSubnetIds
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+
+  TenantProvisionerFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: provision.handler
+      CodeUri: ../migration/runner/
+      Timeout: 120
+      VpcConfig:
+        SubnetIds: !Ref PrivateSubnetIds
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: GoBenefits Lambda egress to Aurora/RDS Proxy
+      VpcId: !Ref VpcId
+
+  # ---- API -----------------------------------------------------------------
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: !Sub "goben-${Env}"
+      AuthenticationType: AMAZON_COGNITO_USER_POOLS
+      UserPoolConfig:
+        UserPoolId: !Ref UserPool
+        AwsRegion: !Ref AWS::Region
+        DefaultAction: ALLOW
+      XrayEnabled: true
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DefinitionS3Location: ../api/schema.graphql
+
+  # AppSync -> Lambda data source (direct-lambda resolvers; no VTL needed — the
+  # full $context is delivered to the handler, matching event.info/identity/arguments).
+  AppSyncDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: appsync.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-resolver
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [lambda:InvokeFunction]
+                Resource: !GetAtt GraphqlResolverFn.Arn
+
+  ResolverDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: GraphqlResolver
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt GraphqlResolverFn.Arn
+
+  MeResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: me
+      DataSourceName: !GetAtt ResolverDataSource.Name
+
+  MyEmployersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: myEmployers
+      DataSourceName: !GetAtt ResolverDataSource.Name
+
+  EmployeesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      TypeName: Query
+      FieldName: employees
+      DataSourceName: !GetAtt ResolverDataSource.Name
+
+Outputs:
+  GraphQLApiUrl:
+    Value: !GetAtt GraphQLApi.GraphQLUrl
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  DbProxyEndpoint:
+    Value: !GetAtt DbProxy.Endpoint
+  DocumentsBucket:
+    Value: !Ref DocumentsBucket

@@ -1,0 +1,161 @@
+# GoBenefits V4 — Implementation Status
+
+**Updated:** 2026-07-01
+
+> **API (contract-first) restart:** see [`API_ROADMAP.md`](API_ROADMAP.md). **Phase A**
+> (inventory) + **Phase B** (schema SDL) are done — `api/schema.graphql` is now the full
+> contract (`employerId` public naming, `planYearId: ID!` read models, aggregate
+> workspace types, future mutations as signatures-only, subscriptions deferred; validated
+> with `graphql.buildSchema`). **Phase C+ resolvers remain BLOCKED until the census/
+> plan-year foundation passes MySQL integration tests.**
+
+## Product decisions
+- **Agencies and brokers do not manage payroll. Payroll is employer-level only.**
+  (Frontend nav enforces this now; backend seed still grants `payroll.*` to
+  broker/agency_admin — remove those grants in a later seed pass.)
+
+## Milestone
+
+> ## ✅ Integration-verified (2026-07-02)
+>
+> The foundation + first modules (tenant routing, migrations, census, dependents)
+> are verified against a **real local MySQL 8.0.31**. All five integration gates
+> pass; the full suite is **63/63**, stable across repeated runs. **Phase C
+> resolvers are now UNBLOCKED.**
+
+---
+
+## Verification status
+
+Verified on **MySQL 8.0.31** (`/usr/local/mysql`, 127.0.0.1:3306), user `goben`,
+via `bun local/setup.ts` + `bun test`. Full suite: **63 pass / 0 fail**.
+
+| Tier | What | Status |
+|---|---|---|
+| Offline | `bun run typecheck` (4 packages) | ✅ clean |
+| Offline | `bun run test:unit` (validation, normalization, scope decision) | ✅ 26/26 pass |
+| Integration | local bootstrap (`setup:local`) | ✅ `Local setup complete.` |
+| Integration | control-plane migrations | ✅ applied |
+| Integration | customer migrations | ✅ applied |
+| Integration | seed + fixtures | ✅ applied |
+| Integration | tenant-isolation tests (`test:tenant`) | ✅ 17/17 |
+| Integration | census tests (`test:census`) | ✅ 14/14 |
+| Integration | dependents + detail tests (`test:dependents`) | ✅ 6/6 |
+| Integration | full suite (`bun test`) | ✅ 63/63 |
+
+### Fixes made during verification (foundation bugs the gates surfaced)
+1. **Migration runner** (`packages/data-access/src/pool.ts`): removed
+   `namedPlaceholders: true` from `createMigrationConnection`. Raw `.sql` files
+   contain `?`/`:` in comments/strings, which mysql2's named-placeholder compiler
+   misread as bind params (customer `0002` seed failed on a `?` inside a comment).
+   The runner's only parameterized query — the `schema_migrations` version insert —
+   uses positional `?`, which works without named placeholders.
+2. **Reference seed** (`db/migrations/control-plane/0002_seed_reference_data.sql`):
+   granted `dependent.read` to `broker`, `employer_admin`, and `employee` (they had
+   `dependent.manage` but not `.read`, so `listDependents` — which requires
+   `dependent.read` — failed). Mirrors how `employee.read`+`.create/.update` are
+   paired elsewhere; dependent access stays row-scoped in the app layer.
+3. **Tenant-isolation test** (`packages/data-access/test/tenant-isolation.test.ts`):
+   the platform-routing assertion used exact-equality on `cust_employer_a`'s employee
+   list, which is brittle when the census/dependents suites add rows in a full run.
+   Rewrote it to assert routing + cross-tenant **isolation** (seed present in its own
+   tenant, never leaking across) — order-independent and a stronger isolation check.
+
+### Local env (already configured on this machine)
+- MySQL **8.0.31** running (`/usr/local/mysql`, root pw `tryit4me`).
+- `.env` at repo root → `DB_HOST=127.0.0.1 DB_PORT=3306 DB_USER=goben DB_PASSWORD=goben`.
+- MySQL `goben`@`localhost`/`127.0.0.1`/`%` (pw `goben`, `mysql_native_password`, ALL priv).
+- Databases `control_plane`, `cust_employer_{a,b,c}` (from `local/init/01-create-databases.sql`).
+- Root-level workspace symlink `node_modules/@goben/{data-access,census}` so
+  `local/setup.ts` resolves `@goben/data-access` from the repo root.
+
+### Re-run (from repo root — `.env` supplies creds; note `test:*` scripts set `DB_USER ??= root`, so run from root where `.env` sets `DB_USER=goben`)
+```
+bun local/setup.ts     # → Local setup complete.
+bun run test:tenant    # 17/17
+bun run test:census    # 14/14
+bun run test:dependents # 6/6
+bun test               # 63/63 (full)
+```
+
+---
+
+## Module status
+
+| Area | Code | Offline tests | Integration tests | Notes |
+|---|---|---|---|---|
+| Phase 0 foundation (tenant routing, RDS Proxy pattern, migration runner, SAM skeleton) | drafted | ✅ scope decision | ✅ tenant-isolation 17/17 | the security core |
+| Control-plane schema + RBAC + catalogs + migration registry | drafted | n/a | ✅ migrations applied | idempotent |
+| Per-customer schema (decomposed, ~55 tables, FKs) | drafted | n/a | ✅ migrations applied | incl. employee_number |
+| Reference seed (roles/permissions/benefit types/steps/life events) | drafted | n/a | ✅ applied (+dependent.read fix) | idempotent |
+| Module 1 — Census (list/get/create/update + context) | drafted | ✅ validation, normalization | ✅ census 14/14 | |
+| Module 1b — Employee Detail + Dependents | drafted | ✅ dependent validation | ✅ dependents 6/6 | |
+
+**Not started (gated until integration is green):** enrollment, payroll exports,
+carrier exports, COBRA, ACA, bulk census import, migration execution.
+
+---
+
+## Integration-test gates — ✅ ALL PASS (2026-07-02, MySQL 8.0.31)
+
+1. `bun run setup:local` completes (`Local setup complete.`). ✅
+2. `bun run test:tenant` — broker/employer/employee/platform/support scope +
+   fail-closed (unknown/archived/disabled). ✅ 17/17
+3. `bun run test:census` — scope, create-writes-correct-DB, no cross-tenant
+   update, validation, employee_number dup/update/search. ✅ 14/14
+4. `bun run test:dependents` — add/list/detail, A↔B isolation, parent-employee
+   guard, update→remove. ✅ 6/6
+5. `bun test` — full suite green. ✅ 63/63
+
+All five pass → milestone is **Integration-verified**. Phase C resolvers unblocked.
+
+---
+
+## GraphQL naming review (findings)
+
+**Fixed now (safe):**
+- Removed unused legacy stub types `Employee`, `Employment`, `EmployeeConnection`
+  (superseded by `CensusEmployee` / `EmployeeDetail`). No resolver impact.
+
+**Recommended, deferred (broad renames — do after integration is green to avoid
+churn before the gate):**
+1. **`id` vs `<entity>Id` inconsistency.** Object types use `id` (Agency, Broker,
+   Customer, PlanYear, Plan, …) while census/detail use `employeeId` /
+   `dependentId`. Recommend: object **identity** fields = `id`; reserve
+   `<entity>Id` for **foreign-key reference** fields (inputs/relations). Would
+   change `CensusEmployee.employeeId`→`id`, `EmployeeDetail.employeeId`→`id`,
+   `Dependent.dependentId`→`id`.
+2. **"customer" vs "employer" terminology.** Args use `customerId`; types use
+   `employer*` (`EmployerCensusContext`, `employerName`) and `Customer*`
+   (`Customer`, `CustomerProgress`, `CustomerStatus`). Product language is
+   Agency→Broker→**Employer**→Employee. Recommend standardizing on **employer**:
+   `customerId`→`employerId` (args), `Customer`→`Employer`,
+   `CustomerProgress`→`EmployerProgress`, `CustomerStatus`→`EmployerStatus`,
+   `customerProgress`/`myEmployers` aligned. Mechanical but wide (touches
+   resolver arg access + service mapping + tests) — batch it as one PR.
+
+---
+
+## Schema / API alignment with Lovable screens
+
+| Lovable screen | API today | Gap / plan |
+|---|---|---|
+| Employee Census list (`employees/index.tsx`) | `employees` (CensusEmployee) + `employerCensusContext` (KPIs) | enrollment status & computed "issues" = later modules; keep screen simplified + expandable |
+| Employee Profile (`employees/$employeeId.tsx`) | `employeeDetail` (personal/employment/contact/address) + `dependents` | per-coverage eligibility, elections, data-quality checklist, beneficiaries = later |
+| Add/Edit employee | `createEmployee`/`updateEmployee` | bulk import deferred (gated) |
+| Dependents section | `addDependent`/`updateDependent`/`removeDependent` | employee self-service (row-level own-scope) = later separate resolver |
+
+Naming note for FE: GraphQL is camelCase (`employeeNumber`, `dateOfBirth`). The
+deferred `id`/`employer` renames (above) would change a few field names — hold FE
+binding on those until the rename batch lands.
+
+---
+
+## Next steps (integration is green)
+1. ✅ Gates 1–5 passed on local MySQL 8.0.31 (2026-07-02).
+2. **Phase C resolvers are now unblocked** — wire the census/dependents/plan-year
+   foundation resolvers against the verified schema (`api/schema.graphql`), keeping
+   the FE on mocks until each resolver is ready to swap behind its query seam.
+3. Then resume modules: Employer Setup essentials → enrollment.
+4. Keep the reference seed's read/manage permission pairing consistent as new
+   modules add `.manage` grants (co-grant the matching `.read`).

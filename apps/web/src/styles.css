@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/* Design tokens. Tailwind v4 maps each --color-* to utilities (bg-*, text-*),
+   and the /opacity modifier works automatically. Polished palette: cool light
+   page background, white surfaces, a dark navy sidebar. */
+@theme {
+  /* Page + surfaces */
+  --color-background: hsl(214 32% 96%);      /* cool light blue-gray page */
+  --color-foreground: hsl(222 47% 11%);
+
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(222 47% 11%);
+
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(222 47% 11%);
+
+  --color-border: hsl(214 28% 90%);
+  --color-input: hsl(214 28% 88%);
+  --color-ring: hsl(221 83% 53%);
+
+  --color-primary: hsl(221 83% 53%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  --color-secondary: hsl(214 32% 94%);
+  --color-secondary-foreground: hsl(222 47% 11%);
+
+  --color-muted: hsl(214 32% 94%);
+  --color-muted-foreground: hsl(215 16% 47%);
+
+  --color-accent: hsl(214 32% 94%);
+  --color-accent-foreground: hsl(222 47% 11%);
+
+  --color-destructive: hsl(0 72% 51%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  --color-success: hsl(142 66% 36%);
+  --color-success-foreground: hsl(140 60% 20%);
+
+  --color-warning: hsl(35 92% 42%);
+  --color-warning-foreground: hsl(28 80% 25%);
+
+  --color-info: hsl(199 89% 45%);
+  --color-info-foreground: hsl(200 80% 22%);
+
+  --color-teal: hsl(173 80% 34%);
+  --color-teal-foreground: hsl(175 70% 20%);
+
+  /* Dark navy sidebar */
+  --color-sidebar: hsl(222 44% 13%);
+  --color-sidebar-foreground: hsl(214 20% 80%);
+  --color-sidebar-heading: hsl(215 16% 55%);
+  --color-sidebar-active: hsl(221 83% 55%);
+  --color-sidebar-active-foreground: hsl(0 0% 100%);
+  --color-sidebar-border: hsl(220 33% 22%);
+}
+
+* {
+  border-color: var(--color-border);
+}
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

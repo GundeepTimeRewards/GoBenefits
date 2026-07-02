@@ -1,0 +1,13 @@
+{
+  "name": "@goben/migration-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@goben/data-access": "*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "typescript": "^5.8.3"
+  }
+}

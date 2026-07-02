@@ -1,0 +1,21 @@
+# Local dev: a single MySQL 8 with the control-plane DB and two customer DBs.
+# Runs without AWS. Apply migrations + seeds with `bun local/setup.ts`.
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: goben-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: goben
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./local/init:/docker-entrypoint-initdb.d:ro
+      - goben-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pgoben"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  goben-mysql-data:

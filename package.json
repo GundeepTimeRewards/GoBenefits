@@ -1,0 +1,31 @@
+{
+  "name": "gobenefits-v4",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "api/*",
+    "apps/*",
+    "migration/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "schema:validate": "bun scripts/validate-schema.ts",
+    "typecheck": "bun x tsc --noEmit -p packages/data-access/tsconfig.json && bun x tsc --noEmit -p packages/census/tsconfig.json && bun x tsc --noEmit -p packages/employer/tsconfig.json && bun x tsc --noEmit -p api/resolvers/tsconfig.json && bun x tsc --noEmit -p migration/runner/tsconfig.json && bun x tsc --noEmit -p apps/web/tsconfig.json",
+    "migrate:control-plane": "bun packages/data-access/src/cli/migrate.ts control-plane",
+    "test": "bun test",
+    "test:unit": "bun test packages/census/test/validation.test.ts packages/census/test/dependent-validation.test.ts packages/census/test/employee-number.test.ts packages/data-access/test/scope-decision.test.ts packages/data-access/test/role-mapping.test.ts",
+    "test:tenant": "bun test packages/data-access/test/tenant-isolation.test.ts",
+    "test:census": "bun test packages/census/test/census.test.ts",
+    "test:dependents": "bun test packages/census/test/dependents.test.ts",
+    "test:employer": "bun test packages/employer/test/employer.test.ts",
+    "setup:local": "bun local/setup.ts",
+    "verify:local": "bun local/setup.ts && bun test",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "graphql": "^17.0.1",
+    "typescript": "^5.8.3"
+  }
+}

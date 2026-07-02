@@ -1,0 +1,16 @@
+{
+  "name": "@goben/graphql-resolver",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/handler.ts",
+  "dependencies": {
+    "@goben/data-access": "*",
+    "@goben/census": "*",
+    "@goben/employer": "*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "typescript": "^5.8.3"
+  }
+}

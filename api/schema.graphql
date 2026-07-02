@@ -1,0 +1,932 @@
+## GoBenefits V4 — AppSync GraphQL schema
+##
+## PHASE B (contract-first, SDL only): types + query/mutation SIGNATURES that mirror the
+## mock-driven frontend (see docs/API_ROADMAP.md, docs/FRONTEND_API_CONTRACT_GAPS.md).
+## NO resolvers are wired. Phase C+ resolver implementation is BLOCKED until the
+## census/plan-year foundation passes MySQL integration tests (docs/IMPLEMENTATION_STATUS.md).
+##
+## Decisions (2026-07-01):
+##  1. Public contract uses `employerId` (NOT `customerId`). Internal tenant routing maps
+##     employerId -> customer DB; `customerId` must NOT appear on new/public fields.
+##  2. Plan-year-sensitive reads take an explicit `planYearId: ID!`. `currentPlanYear`
+##     resolves the UI default. No hidden plan-year defaults on read models.
+##  3. Page dashboards/workspaces are server-computed AGGREGATE read models (one query per
+##     page); low-level queries are for detail screens only.
+##  4. Subscriptions are DEFERRED for MVP (see the commented block at the end). Use
+##     query + refetch for now.
+##
+## Tenancy: the employer (customer DB) is resolved server-side from Cognito identity ->
+## tenant registry, then permission x scope (decideEmployerAccess) BEFORE any DB access.
+## `employerId` from a client is a claim, authorized server-side — never trusted raw.
+
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+scalar AWSDate
+scalar AWSDateTime
+scalar AWSEmail
+
+## --- Enums -------------------------------------------------------------------
+enum Role { super_admin support agency_admin broker employer_admin employee }
+enum EmployerStatus { prospect setup active archived }
+enum PlanYearStatus { setup open_enrollment active archived }
+enum CoverageLine { medical dental vision rx basic_life vol_life std ltd accident critical_illness hospital }
+enum CoverageTier { ee ee_spouse ee_child family waived }
+enum ElectionStatus { not_started in_progress submitted approved waived terminated }
+enum EmploymentStatus { active terminated cobra retired leave }
+enum Relationship { spouse child domestic_partner other }
+enum PayFrequency { F12 F24 F26 F52 }   ## monthly / semi-monthly / bi-weekly / weekly
+enum Severity { high medium low }
+enum LaunchState { not_launched launched closed archived }
+enum ConfigStatus { complete partial missing }
+enum ChecklistStatus { complete in_progress needs_attention not_started blocked not_applicable }
+
+## Generic result shapes for async / stubbed actions.
+type JobHandle { jobId: ID!  status: String! }
+type ActionResult { ok: Boolean!  message: String }
+type RemoveResult { removed: Boolean! }
+
+## --- Identity & org (control-plane) -----------------------------------------
+type Me { userId: ID!  role: Role!  agencyId: ID  email: AWSEmail!  employerId: ID }
+
+type Agency { id: ID!  name: String!  brokers: [Broker!]! }
+type Broker { id: ID!  name: String!  email: AWSEmail  agencyId: ID! }
+
+## Book-of-business row (broker/agency) and own-employer summary.
+## NOTE (Phase C / C1): per-tenant metrics are NULLABLE here on purpose. `myEmployers`
+## is a control-plane-only list and MUST NOT fan out across tenant/customer DBs to
+## compute counts/enrollment. These fields stay null in C1 and are populated by the
+## event-fed aggregate read-model (control-plane) in a later phase.
+type EmployerSummary {
+  employerId: ID!
+  name: String!
+  industry: String
+  employeeCount: Int
+  activeCount: Int
+  currentPlanYearId: ID
+  currentPlanYearLabel: String
+  setupStatus: String
+  enrollmentState: String
+  completion: Int
+  issues: Int
+  renewalMonth: String
+  agency: String
+  broker: String
+}
+
+type Employer {
+  employerId: ID!
+  name: String!
+  legalName: String
+  ein: String
+  industry: String
+  employeeCount: Int!
+  activeCount: Int
+  locations: Int
+  renewalMonth: String
+  agency: String
+  broker: String
+  ## Nullable: a newly-provisioned employer may have no plan year yet. Resolved from
+  ## the employer's own (single-tenant) DB — this is one routed read, not a fan-out.
+  currentPlanYearId: ID
+  currentPlanYearLabel: String
+  status: EmployerStatus!
+}
+
+## Employer dashboard read model (aggregate).
+type EmployerOverview {
+  employerId: ID!
+  planYearId: ID!
+  planYearLabel: String!
+  planYearStatus: PlanYearStatus!
+  eligibleEmployees: Int!
+  enrolled: Int
+  waived: Int
+  benefitPlans: Int
+  setupReadinessPct: Int
+  enrollmentPct: Int
+  launchBlockers: Int
+  needsAttention: [AttentionItem!]!
+}
+type AttentionItem { key: ID!  title: String!  severity: Severity!  route: String }
+
+## --- Plan years --------------------------------------------------------------
+type PlanYear {
+  id: ID!
+  label: String!
+  year: Int!
+  status: PlanYearStatus!
+  periodStart: AWSDate!
+  periodEnd: AWSDate!
+  oeStart: AWSDate
+  oeEnd: AWSDate
+  oeWindowLabel: String
+  planCount: Int
+  completionPct: Int
+  eligibleCount: Int
+  enrollmentPct: Int
+  launchBlockers: Int
+  oeDaysLeft: Int
+  needsActionCount: Int
+  plans: [Plan!]!
+}
+type ActivityItem { when: String!  who: String!  action: String! }
+
+## Derived setup checklist (StepDefinition x domain state; no task table).
+type PlanYearSetupStatus {
+  employerId: ID!
+  planYearId: ID!
+  completionPct: Int!
+  blockers: Int!
+  steps: [ChecklistStep!]!
+}
+type ChecklistStep {
+  key: ID!
+  label: String!
+  description: String
+  category: String
+  requiredByDefault: Boolean!
+  status: ChecklistStatus!
+  route: String
+  message: String
+}
+
+## --- Census & people ---------------------------------------------------------
+type CensusEmployee {
+  employeeId: ID!
+  employeeNumber: String
+  firstName: String!
+  lastName: String!
+  email: AWSEmail
+  phone: String
+  dateOfBirth: AWSDate
+  gender: String
+  employmentStatus: String
+  hireDate: AWSDate
+  terminationDate: AWSDate
+  employmentClass: String
+  eligibilityClass: String
+  payType: String
+  salary: Float
+  addressSummary: String
+  dependentCount: Int!
+  eligibilityStatus: Boolean
+}
+type CensusEmployeeConnection { items: [CensusEmployee!]!  nextToken: String }
+
+type EmployerCensusContext {
+  employerId: ID!
+  employerName: String!
+  planYearId: ID
+  planYearLabel: String
+  totalEmployees: Int!
+  activeEmployees: Int!
+  missingRequiredCount: Int!
+  missingEligibilityClassCount: Int!
+  dependentsMissingDataCount: Int!
+  needsReviewCount: Int!
+}
+
+type Dependent {
+  dependentId: ID!
+  firstName: String!
+  lastName: String!
+  dateOfBirth: AWSDate
+  gender: String
+  relationship: Relationship!
+  disabled: Boolean
+  student: Boolean
+}
+
+type EmployeeDetail {
+  employeeId: ID!
+  employeeNumber: String
+  firstName: String!
+  middleName: String
+  lastName: String!
+  dateOfBirth: AWSDate
+  gender: String
+  email: AWSEmail
+  altEmail: AWSEmail
+  homePhone: String
+  cellPhone: String
+  addressLine1: String
+  city: String
+  state: String
+  zip: String
+  employmentStatus: String
+  hireDate: AWSDate
+  originalHireDate: AWSDate
+  terminationDate: AWSDate
+  jobTitle: String
+  employmentClass: String
+  eligibilityClass: String
+  payType: String
+  salary: Float
+  dependents: [Dependent!]!
+  ## NOTE: elections / eligibility / EOI / documents / audit tabs are representative
+  ## mock in the FE — future sub-resolvers (Phase E), not modeled here yet.
+}
+
+## --- Plans & Rates -----------------------------------------------------------
+type Plan {
+  id: ID!
+  line: CoverageLine!
+  carrierName: String
+  planName: String!
+  planCode: String
+  hsaEligible: Boolean
+  effective: String
+  setupIssues: [String!]
+  rates: [PlanRate!]!
+}
+type PlanRate {
+  id: ID!
+  age: Int
+  rateEe: Float!
+  rateEeSpouse: Float
+  rateEeChild: Float
+  rateFamily: Float
+  effectiveDate: AWSDate!
+}
+
+## Plans & Rates readiness read model (feeds Plan Year Setup + Enrollment launch blockers).
+type PlanCatalog {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  summary: PlanCatalogSummary!
+  plans: [PlanCatalogRow!]!
+}
+type PlanCatalogSummary {
+  total: Int!
+  ready: Int!
+  missingRates: Int!
+  missingContributions: Int!
+  missingDocuments: Int!
+  launchBlockers: Int!
+}
+type PlanCatalogRow {
+  planId: ID!
+  name: String!
+  carrier: String!
+  line: CoverageLine!
+  benefitType: String!
+  subtype: String
+  status: String!
+  effective: String
+  enrolled: Int
+  coverageTiers: Int
+  rateStatus: ConfigStatus!
+  contributionStatus: String!
+  contributionRule: String
+  documentStatus: ConfigStatus!
+  eligibleClasses: String
+  launchBlocker: Boolean!
+  warnings: [String!]!
+}
+
+type BenefitPlanDetail {
+  planId: ID!
+  name: String!
+  carrier: String!
+  line: CoverageLine!
+  subtype: String
+  network: String
+  fundingType: String
+  effective: String
+  renewalDate: String
+  enrolled: Int
+  status: String
+  benefits: [PlanBenefitRow!]!
+  rates: [PlanRateRow!]!
+  contributions: [PlanContribRow!]!
+  eligibility: [PlanEligRow!]!
+  documents: [PlanDocRow!]!
+}
+type PlanBenefitRow { label: String!  inNetwork: String!  outNetwork: String! }
+type PlanRateRow { tier: String!  total: String!  employer: String!  employee: String! }
+type PlanContribRow { tier: String!  employer: String!  employee: String! }
+type PlanEligRow { class: String!  waiting: String!  note: String! }
+type PlanDocRow { name: String!  type: String!  date: String! }
+
+## --- Enrollment Center (aggregate) + Progress --------------------------------
+type EnrollmentCenter {
+  employerId: ID!
+  planYearId: ID!
+  launchState: LaunchState!
+  launchReadiness: LaunchReadiness
+  openEnrollmentSummary: OpenEnrollmentSummary
+  windows: [EnrollmentWindow!]!
+  ongoingWork: [OngoingWorkItem!]!
+}
+type LaunchReadiness {
+  planYearStatus: PlanYearStatus!
+  readinessPercent: Int!
+  canLaunch: Boolean!
+  launchState: LaunchState!
+  blockers: [ReadinessItem!]!
+  warnings: [ReadinessItem!]!
+  checklist: [ReadinessCheck!]!
+}
+type ReadinessItem { key: ID!  label: String!  severity: Severity!  area: String!  description: String }
+type ReadinessCheck { key: ID!  label: String!  status: String! }
+type EnrollmentWindow {
+  id: ID!
+  name: String!
+  type: String!
+  windowLabel: String
+  effectiveRule: String
+  employeesAffected: String
+  status: String!
+  completion: Int
+  nextAction: String
+}
+type OngoingWorkItem {
+  key: ID!
+  label: String!
+  count: Int!
+  countLabel: String
+  status: String
+  urgency: String
+  nextAction: String
+  route: String
+}
+## Annual OPEN ENROLLMENT numbers only (no new-hire/QLE/special/mid-year).
+type OpenEnrollmentSummary {
+  completionPercent: Int!
+  eligible: Int!
+  submitted: Int!
+  inProgress: Int!
+  notStarted: Int!
+  needsAction: Int!
+  enrolled: Int!
+  waived: Int!
+  lateMissing: Int!
+  carrierFilesStatus: String
+}
+
+## Live progress detail (Enrollment Progress page).
+type EnrollmentProgress {
+  employerId: ID!
+  planYearId: ID!
+  status: String!
+  submitted: Int!
+  inProgress: Int!
+  notStarted: Int!
+  notInvited: Int!
+  byCoverage: [CoverageProgress!]!
+  reminders: [ReminderRow!]
+  byBenefit: [BenefitProgress!]
+}
+type CoverageProgress { name: String!  elected: Int!  waived: Int!  pending: Int! }
+type ReminderRow { date: String!  audience: String!  channel: String! }
+type BenefitProgress { name: String!  completed: Int!  total: Int! }
+
+## --- Elections Review (HR) ---------------------------------------------------
+## Reviews submitted INTENT (employee_election) before it becomes coverage_record.
+type ElectionReview {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  counts: ElectionReviewCounts!
+  rows: [ElectionReviewRow!]!
+}
+type ElectionReviewCounts {
+  needsReview: Int!
+  readyToApprove: Int!
+  eoi: Int!
+  dependent: Int!
+  waiver: Int!
+  cost: Int!
+  approved: Int!
+}
+type ElectionReviewRow {
+  id: ID!
+  employee: String!
+  electionType: String!
+  plans: String!
+  tier: String!
+  dependents: Int!
+  issue: String
+  issueType: String!
+  eeCost: Float!
+  submitted: String
+  status: String!
+  action: String!
+}
+
+## --- Life Events -------------------------------------------------------------
+type LifeEventQueue {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  counts: LifeEventQueueCounts!
+  tasks: [LifeEventTask!]!
+  cases: [LifeEventCase!]!
+}
+type LifeEventQueueCounts {
+  pendingReview: Int!
+  needsDocuments: Int!
+  electionWindowsOpen: Int!
+  carrierPending: Int!
+  completedThisMonth: Int!
+}
+type LifeEventTask { key: ID!  label: String!  count: Int! }
+## Lifecycle: submitted -> under_review -> needs_documents -> approved | denied ->
+##            election_window_open -> election_submitted -> completed
+type LifeEventCase {
+  id: ID!
+  employee: String!
+  eventType: String!
+  status: String!
+  documents: String
+  electionWindow: String
+  nextStep: String
+  submitted: String
+}
+## Employee self-service — row-level "own records only" auth.
+type EmployeeLifeEventList { employeeId: ID!  events: [EmployeeLifeEvent!]! }
+type EmployeeLifeEvent { id: ID!  type: String!  date: String  status: String!  documents: String }
+
+## --- Documents & Forms -------------------------------------------------------
+type DocumentWorkspace {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  readinessPercent: Int!
+  missingCount: Int!
+  employeeActionCount: Int!
+  expiringSoonCount: Int!
+  issues: [DocReadinessIssue!]!
+  tasks: [DocTask!]!
+  categories: [DocCategoryCount!]!
+  documents: [Document!]!
+}
+type DocReadinessIssue { key: ID!  label: String!  count: Int!  tone: String! }
+type DocTask { key: ID!  label: String!  related: String!  priority: String!  area: String! }
+type DocCategoryCount { title: String!  total: Int!  sub: String! }
+type Document {
+  documentId: ID!
+  name: String!
+  category: String!
+  type: String
+  coverage: String
+  carrier: String
+  relatedTo: String
+  requiredFor: String
+  status: String!
+  expiresAt: AWSDate
+  uploadedAt: AWSDateTime
+  uploadedBy: String
+  planYearId: ID
+  employerId: ID
+  carrierId: ID
+  coverageType: String
+  employeeActionRequired: Boolean
+  signatureStatus: String
+  generatedFormStatus: String
+}
+
+## --- Deductions (recurring per-pay-period workflow) --------------------------
+type DeductionsWorkspace {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  deductionSummary: DeductionReviewSummary!
+  deductionReview: [DeductionReviewRow!]!
+  deductionChanges: [DeductionChange!]!
+  exportBatches: [ExportBatch!]!
+}
+type DeductionReviewSummary {
+  readyToExport: Int!
+  needsReview: Int!
+  missingCode: Int!
+  amountChanged: Int!
+  effectiveThisPeriod: Int!
+  totalEe: String!
+  totalEr: String!
+}
+type DeductionReviewRow {
+  id: ID!
+  employee: String!
+  plan: String!
+  tier: String!
+  effective: String
+  payrollGroup: String
+  code: String
+  ee: String!
+  er: String!
+  changeType: String!
+  status: String!
+  issue: String
+}
+type DeductionChange {
+  id: ID!
+  employee: String!
+  changeType: String!
+  previous: String!
+  new: String!
+  effective: String
+  status: String!
+}
+type ExportBatch {
+  id: ID!
+  batchDate: String
+  payPeriod: String!
+  employees: Int!
+  totalEe: String!
+  totalEr: String!
+  status: String!
+  file: String
+  issues: String
+}
+
+## --- Payroll Data (imported history / ACA lookback support) -----------------
+type PayrollDataWorkspace {
+  employerId: ID!
+  planYearId: ID!
+  readOnly: Boolean!
+  connection: PayrollConnection!
+  importSummary: PayrollImportSummary!
+  readiness: PayrollReadiness!
+  aca: PayrollAcaLookback!
+  payPeriods: [ImportedPayPeriod!]!
+  employeeRecords: [EmployeePayrollRecord!]!
+  settings: PayrollSettings!
+}
+type PayrollConnection {
+  provider: String!
+  frequency: String!
+  currentGroup: String
+  firstImported: String
+  lastImported: String
+  measurementPeriod: String
+  stabilityPeriod: String
+  lastSync: String
+  nextSync: String
+  dataSource: String
+  connected: Boolean!
+  lookbackReady: Boolean!
+}
+type PayrollImportSummary { importedPayPeriods: Int!  matchedEmployees: Int!  unmatchedEmployees: Int!  lastSyncStatus: String! }
+type PayrollReadiness { percent: Int!  issues: [PayrollReadinessIssue!]! }
+type PayrollReadinessIssue { key: ID!  label: String!  count: Int!  tone: String! }
+type PayrollAcaLookback {
+  measurementPeriod: String!
+  stabilityPeriod: String!
+  administrativePeriod: String
+  calcStatus: String
+  lastCalculated: String
+  fullTimeDeterminationStatus: String
+  affordabilityStatus: String
+  form1095Status: String
+}
+type ImportedPayPeriod {
+  id: ID!
+  period: String!
+  payDate: String
+  group: String
+  employees: Int
+  hours: String
+  wages: String
+  status: String!
+  issues: Int
+  source: String
+}
+type EmployeePayrollRecord {
+  id: ID!
+  name: String!
+  employeeNumber: String
+  group: String
+  matchedCensus: String
+  hours: String
+  wages: String
+  aca: String
+  issues: String
+  lastImported: String
+}
+type PayrollSettings {
+  provider: String
+  frequency: String
+  deductionSchedule: String
+  payrollGroups: String
+  codeMapping: String
+  syncSettings: String
+  exportFormat: String
+}
+
+## Legacy row (kept for the deductions detail list).
+type PayrollDeduction {
+  id: ID!
+  employeeId: ID!
+  planLabel: String
+  costEe: Float!
+  costEr: Float!
+  costTotal: Float!
+  payCycle: String
+  effectiveDate: AWSDate
+  processed: Boolean!
+}
+
+## --- Carrier exports ---------------------------------------------------------
+type CarrierExportWorkspace {
+  employerId: ID!
+  planYearId: ID!
+  batches: [CarrierBatch!]!
+}
+type CarrierBatch { id: ID!  carrier: String!  format: String  lines: Int  errors: Int  status: String!  generated: String }
+
+## --- Compliance (ACA + COBRA + notices) -------------------------------------
+## ACA lookback / affordability are computed FROM Payroll Data (see PayrollAcaLookback).
+type ComplianceWorkspace {
+  employerId: ID!
+  planYearId: ID!
+  complianceYear: Int!
+  filingStatus: String
+  overview: ComplianceOverview!
+  aca: AcaCompliance!
+  cobra: CobraCompliance!
+  notices: [ComplianceNotice!]!
+}
+type ComplianceOverview {
+  acaReadinessPct: Int!
+  aleStatus: String!
+  formsReady: Int
+  formsTotal: Int
+  cobraPending: Int
+  noticesDue: Int
+  needsAttention: [AttentionItem!]!
+  deadlines: [ComplianceDeadline!]!
+}
+type ComplianceDeadline { date: String!  item: String!  category: String!  status: String! }
+type AcaCompliance {
+  readinessPercent: Int!
+  blockedForms: Int!
+  issues: [ReadinessItem!]!
+  ale: AleDetermination!
+  affordability: Affordability!
+  forms: [Form1095c!]!
+  filingHistory: [FilingYear!]!
+}
+type AleDetermination { aleStatus: String!  avgMonthlyCount: Float  readinessPercent: Int  months: [AleMonth!]! }
+type AleMonth { month: String!  fullTime: Int!  ptHours: String  fte: String  total: String  status: String! }
+type Affordability { safeHarborMethod: String!  affordable: Int!  needsReview: Int!  missing: Int!  employees: [AffordabilityRow!]! }
+type AffordabilityRow { employee: String!  basis: String  wage: String  premium: String  result: String!  safeHarborCode: String  status: String! }
+type Form1095c { employee: String!  acaStatus: String  line14: String  line16: String  months: String  status: String!  issues: String }
+type FilingYear { year: String!  forms: Int  partner: String  generated: String  submitted: String  irsStatus: String!  corrections: Int }
+type CobraCompliance {
+  activeParticipants: Int!
+  qualifyingEvents: Int!
+  overdueNotices: Int!
+  paymentIssues: Int!
+  events: [CobraEvent!]!
+  beneficiaries: [CobraBeneficiary!]!
+  payments: [CobraPayment!]!
+}
+type CobraEvent { id: ID!  person: String!  relationship: String  event: String!  noticeStatus: String  cobraStatus: String  paymentStatus: String  tpaStatus: String  nextStep: String }
+type CobraBeneficiary { name: String!  relationship: String  event: String!  coverage: String  status: String! }
+type CobraPayment { person: String!  coverage: String  period: String  amount: String  due: String  status: String! }
+type ComplianceNotice { type: String!  audience: String  due: String  delivery: String  status: String! }
+
+## --- Elections / Quoting (existing draft types) ------------------------------
+type Election {
+  id: ID!
+  employeeId: ID!
+  plan: Plan!
+  coverageTier: CoverageTier!
+  status: ElectionStatus!
+  premiumTotal: Float
+  employerContribution: Float
+  employeeCost: Float
+  effectiveDate: AWSDate
+  coveredDependents: [Dependent!]!
+}
+type Quote { id: ID!  employerId: ID!  planYearId: ID!  createdAt: AWSDateTime!  lines: [QuoteLine!]! }
+type QuoteLine { line: CoverageLine!  planId: ID!  monthlyTotal: Float!  employerCost: Float!  employeeCost: Float! }
+
+## Cross-tenant rollup for broker/agency dashboards (aggregate read-model).
+type EmployerProgress {
+  employerId: ID!
+  planYearId: ID!
+  eligibleCount: Int!
+  enrolledCount: Int!
+  waivedCount: Int!
+  notStartedCount: Int!
+}
+
+## =============================================================================
+## Query — page read models are aggregates; low-level queries are for details.
+## =============================================================================
+type Query {
+  ## Identity & employer selection
+  me: Me!
+  myEmployers: [EmployerSummary!]!
+  employer(employerId: ID!): Employer
+  employerOverview(employerId: ID!, planYearId: ID!): EmployerOverview
+  employerProgress(planYearId: ID!): [EmployerProgress!]!   ## broker/agency cross-tenant rollup
+
+  ## Plan years
+  planYears(employerId: ID!): [PlanYear!]!
+  currentPlanYear(employerId: ID!): PlanYear
+  planYearActivity(employerId: ID!): [ActivityItem!]!
+  planYearSetupStatus(employerId: ID!, planYearId: ID!): PlanYearSetupStatus
+
+  ## Census & people
+  employerCensusContext(employerId: ID!, planYearId: ID!): EmployerCensusContext
+  employees(employerId: ID!, planYearId: ID!, search: String, limit: Int = 50, nextToken: String): CensusEmployeeConnection!
+  employeeDetail(employerId: ID!, employeeId: ID!): EmployeeDetail
+  dependents(employerId: ID!, employeeId: ID!): [Dependent!]!
+
+  ## Plans & Rates
+  planCatalog(employerId: ID!, planYearId: ID!): PlanCatalog
+  benefitPlanDetail(employerId: ID!, planYearId: ID!, planId: ID!): BenefitPlanDetail
+
+  ## Enrollment
+  enrollmentCenter(employerId: ID!, planYearId: ID!): EnrollmentCenter
+  enrollmentProgress(employerId: ID!, planYearId: ID!): EnrollmentProgress
+  electionReview(employerId: ID!, planYearId: ID!): ElectionReview
+  electionsForEmployee(employerId: ID!, employeeId: ID!): [Election!]!
+
+  ## Life events
+  lifeEventQueue(employerId: ID!, planYearId: ID!): LifeEventQueue
+  employeeLifeEvents: EmployeeLifeEventList   ## employee self; own-records auth
+
+  ## Documents
+  documentWorkspace(employerId: ID!, planYearId: ID!): DocumentWorkspace
+
+  ## Payroll / deductions
+  deductionsWorkspace(employerId: ID!, planYearId: ID!): DeductionsWorkspace
+  payrollDataWorkspace(employerId: ID!, planYearId: ID!): PayrollDataWorkspace
+  payrollDeductions(employerId: ID!, planYearId: ID!): [PayrollDeduction!]! @deprecated(reason: "Transitional — use deductionsWorkspace.")
+
+  ## Carrier & compliance
+  carrierExportWorkspace(employerId: ID!, planYearId: ID!): CarrierExportWorkspace
+  complianceWorkspace(employerId: ID!, planYearId: ID!): ComplianceWorkspace
+}
+
+## =============================================================================
+## Mutations. The first block is the drafted core; everything under FUTURE is
+## CONTRACT ONLY (signatures) — NOT implemented, and blocked until MySQL verify.
+## Input shapes for FUTURE mutations are intentionally minimal; finalized per phase.
+## =============================================================================
+type Mutation {
+  ## --- Core (drafted; still gated on MySQL verification) ---
+  createEmployee(input: CreateEmployeeInput!): CensusEmployee!
+  updateEmployee(input: UpdateEmployeeInput!): CensusEmployee!
+  addDependent(input: CreateDependentInput!): Dependent!
+  updateDependent(input: UpdateDependentInput!): Dependent!
+  removeDependent(employerId: ID!, dependentId: ID!): RemoveResult!
+  submitElection(input: SubmitElectionInput!): Election!
+  generateQuote(input: GenerateQuoteInput!): Quote!
+  generatePayrollDeductions(employerId: ID!, planYearId: ID!): JobHandle!   ## async (SQS)
+
+  ## --- FUTURE: Plan years (Phase D) — NOT IMPLEMENTED ---
+  createPlanYear(employerId: ID!, year: Int!, label: String!): PlanYear
+  copyFromPriorYear(employerId: ID!, fromPlanYearId: ID!, toYear: Int!): PlanYear
+  activatePlanYear(employerId: ID!, planYearId: ID!): PlanYear
+  archivePlanYear(employerId: ID!, planYearId: ID!): PlanYear
+
+  ## --- FUTURE: Plans & rates (Phase D) — NOT IMPLEMENTED ---
+  addPlan(employerId: ID!, planYearId: ID!, line: CoverageLine!, planName: String!): ActionResult
+  duplicatePlan(employerId: ID!, planId: ID!): ActionResult
+  importRates(employerId: ID!, planYearId: ID!): JobHandle
+  updateContributionRule(employerId: ID!, planId: ID!): ActionResult
+
+  ## --- FUTURE: Enrollment (Phase D) — NOT IMPLEMENTED ---
+  launchEnrollment(employerId: ID!, planYearId: ID!): EnrollmentCenter
+  sendEnrollmentReminders(employerId: ID!, planYearId: ID!, audience: String): JobHandle
+  createEnrollmentWindow(employerId: ID!, planYearId: ID!, type: String!): EnrollmentWindow
+
+  ## --- FUTURE: Elections review (Phase E) — NOT IMPLEMENTED ---
+  approveElection(employerId: ID!, planYearId: ID!, electionId: ID!): ElectionReviewRow
+  sendBackElection(employerId: ID!, planYearId: ID!, electionId: ID!, note: String): ElectionReviewRow
+  requestEoi(employerId: ID!, electionId: ID!): ActionResult
+  requestDependentDocs(employerId: ID!, electionId: ID!): ActionResult
+  approveAllReadyElections(employerId: ID!, planYearId: ID!): ActionResult
+
+  ## --- FUTURE: Life events — employee self (Phase E) — NOT IMPLEMENTED ---
+  reportLifeEvent(input: ReportLifeEventInput!): EmployeeLifeEvent
+
+  ## --- FUTURE: Life events — HR queue (Phase E) — NOT IMPLEMENTED ---
+  approveLifeEvent(employerId: ID!, caseId: ID!): LifeEventCase
+  denyLifeEvent(employerId: ID!, caseId: ID!, reason: String): LifeEventCase
+  requestLifeEventDocs(employerId: ID!, caseId: ID!): ActionResult
+  openElectionWindow(employerId: ID!, caseId: ID!): ActionResult
+
+  ## --- FUTURE: Documents (Phase E) — NOT IMPLEMENTED ---
+  uploadDocument(employerId: ID!, planYearId: ID!, category: String!, name: String!): Document
+  requestSignature(employerId: ID!, documentId: ID!): ActionResult
+  generateConfirmations(employerId: ID!, planYearId: ID!): JobHandle
+
+  ## --- FUTURE: Deductions / payroll (Phase E) — NOT IMPLEMENTED ---
+  mapDeductionCode(employerId: ID!, deductionId: ID!, code: String!): DeductionReviewRow
+  exportReadyDeductions(employerId: ID!, planYearId: ID!): JobHandle
+  reconcileBatch(employerId: ID!, batchId: ID!): ExportBatch
+  syncPayrollProvider(employerId: ID!): JobHandle
+  importPayrollData(employerId: ID!, planYearId: ID!): JobHandle
+  runAcaLookback(employerId: ID!, planYearId: ID!): JobHandle
+  recalculateLookback(employerId: ID!, planYearId: ID!): JobHandle
+
+  ## --- FUTURE: Compliance (Phase F) — NOT IMPLEMENTED ---
+  generate1095c(employerId: ID!, complianceYear: Int!): JobHandle
+  sendToFilingPartner(employerId: ID!, complianceYear: Int!): JobHandle
+  calculateAleStatus(employerId: ID!, complianceYear: Int!): JobHandle
+  generateCobraNotice(employerId: ID!, cobraEventId: ID!): ActionResult
+  recordCobraPayment(employerId: ID!, cobraEventId: ID!, amount: Float!): CobraPayment
+}
+
+## --- Inputs ------------------------------------------------------------------
+input CreateEmployeeInput {
+  employerId: ID!
+  firstName: String!
+  lastName: String!
+  email: AWSEmail
+  phone: String
+  dateOfBirth: AWSDate
+  gender: String
+  employmentStatus: String
+  hireDate: AWSDate
+  terminationDate: AWSDate
+  employeeClass: String
+  eligibilityClassId: ID
+  payType: String
+  salary: Float
+  employeeNumber: String
+}
+input UpdateEmployeeInput {
+  employerId: ID!
+  employeeId: ID!
+  firstName: String!
+  lastName: String!
+  email: AWSEmail
+  phone: String
+  dateOfBirth: AWSDate
+  gender: String
+  employmentStatus: String
+  hireDate: AWSDate
+  terminationDate: AWSDate
+  employeeClass: String
+  eligibilityClassId: ID
+  payType: String
+  salary: Float
+  employeeNumber: String
+}
+input CreateDependentInput {
+  employerId: ID!
+  employeeId: ID!
+  firstName: String!
+  lastName: String!
+  dateOfBirth: AWSDate
+  gender: String
+  relationship: Relationship!
+  disabled: Boolean
+  student: Boolean
+}
+input UpdateDependentInput {
+  employerId: ID!
+  dependentId: ID!
+  employeeId: ID
+  firstName: String!
+  lastName: String!
+  dateOfBirth: AWSDate
+  gender: String
+  relationship: Relationship!
+  disabled: Boolean
+  student: Boolean
+}
+input SubmitElectionInput {
+  employerId: ID!
+  employeeId: ID!
+  planId: ID!
+  coverageTier: CoverageTier!
+  dependentIds: [ID!]
+}
+input GenerateQuoteInput {
+  employerId: ID!
+  planYearId: ID!
+  planIds: [ID!]!
+  contributionClassId: ID
+}
+## Employee self-service Report Life Event wizard.
+input ReportLifeEventInput {
+  eventType: String!
+  eventDate: AWSDate!
+  notes: String
+  priorCoverageEndDate: AWSDate
+  newCoverageStartDate: AWSDate
+  affectedDependentIds: [ID!]
+  addsNewDependent: Boolean
+}
+
+## =============================================================================
+## Subscriptions — DEFERRED for MVP (use query + refetch). Future candidates:
+##   onEnrollmentProgressChanged(employerId, planYearId)   -> live OE dashboards
+##   onExportBatchStatus(employerId, batchId)              -> deduction/carrier exports
+##   onDocumentStatusChanged(employerId, documentId)       -> generation / e-signature
+##   onMigrationJobStatus(jobId)                           -> data migration jobs
+## Re-introduce a `type Subscription { ... }` + `subscription:` in the schema block
+## when the first real-time surface is prioritized.
+## =============================================================================
