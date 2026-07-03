@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CensusHealth } from "@/components/census/CensusHealth";
+import { AddEmployeeForm } from "@/components/census/C1MutationForms";
 import { employmentStatusLabel, employeeIssues, type CensusEmployee } from "@/lib/census-mock";
 
 function statusTone(label: string): string {
@@ -103,7 +104,7 @@ export function CensusPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" className="border-primary/40 text-primary hover:bg-primary/5"><ShieldCheck className="mr-2 h-4 w-4" />Run Eligibility Preview</Button>
           <Button size="sm" variant="secondary"><Upload className="mr-2 h-4 w-4" />Import</Button>
-          <Button size="sm"><UserPlus className="mr-2 h-4 w-4" />Add Employee</Button>
+          <AddEmployeeForm employerId={employerId} trigger={<Button size="sm"><UserPlus className="mr-2 h-4 w-4" />Add Employee</Button>} />
         </div>
       </div>
 

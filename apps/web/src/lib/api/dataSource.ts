@@ -23,9 +23,10 @@ export const DATA_SOURCE_MODE: DataSourceMode = ((): DataSourceMode => {
 /** Dev-only seeded cognito_sub for the local endpoint (VITE_DEV_AUTH_SUB). */
 export const DEV_AUTH_SUB: string | undefined = readEnv("VITE_DEV_AUTH_SUB");
 
-/** The hooks whose backend resolver exists in C1 and may read live. Everything else is
- *  mock-only until its Phase D–F backend lands. */
+/** The operations whose backend resolver exists in C1 and may go live (reads + the C1
+ *  mutations). Everything else is mock-only until its Phase D–F backend lands. */
 export const C1_LIVE_CAPABLE = new Set<string>([
+  // reads
   "me",
   "myEmployers",
   "employer",
@@ -35,6 +36,12 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "employerCensusContext",
   "employeeDetail",
   "dependents",
+  // mutations
+  "createEmployee",
+  "updateEmployee",
+  "addDependent",
+  "updateDependent",
+  "removeDependent",
 ]);
 
 export type DataSourceResolution = "mock" | "live" | "fallback";

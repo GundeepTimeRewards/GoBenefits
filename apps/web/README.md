@@ -149,3 +149,42 @@ end-to-end against the local endpoint. No AWS.
 - **Deployed backend**: hybrid uses the *local* endpoint; AppSync live needs FOUNDATION-DEPLOY
   (Cognito MFA fix + a target AWS account) and real Cognito auth in place of the dev sub shim.
 - **Non-C1 hooks** stay mock until their Phase D–F resolvers exist.
+
+## C1 mutation hooks + forms (C2-FE-3)
+
+The five C1 mutations are now available as hooks (`@/lib/api`): `useCreateEmployee`,
+`useUpdateEmployee`, `useAddDependent`, `useUpdateDependent`, `useRemoveDependent`. Minimal
+inline forms (`components/census/C1MutationForms.tsx`) wire the existing **Add Employee**
+(Census), **Edit Employee** and the **Dependents** tab (add/edit/remove) on the employee
+detail page.
+
+**Mock mode (default):** mutations are a **no-op** — nothing is persisted (matching the
+prior placeholder buttons); the form shows a "Mock mode: not persisted" note. No screen
+breaks; no backend required.
+
+**Hybrid-live mode:** with `VITE_DATA_SOURCE=hybrid` + endpoint/auth configured **and a live
+(UUID) employer selected**, forms submit through the C1 GraphQL mutations and, on success,
+invalidate the relevant reads (`census`, `censusContext`, `employeeDetail`, `dependents`) so
+the UI refreshes. A non-live (mock slug) employer stays no-op to avoid id-space mixing.
+
+**Error handling:** `ValidationError` → inline field-style message; `Unauthorized` →
+"Not permitted: …"; anything else → generic "Error: …". (`FormMutationError.type` is
+`validation | unauthorized | error`.)
+
+**Optional mutation smoke test** (writes to the local DB — off by default):
+```
+# server running + bun local/setup.ts done:
+SMOKE_MUTATIONS=true bun run smoke:c1        # create→update employee, add→update→remove dependent
+bun local/setup.ts                           # reset the local DB afterwards (the created employee remains)
+```
+Regular `bun run smoke:c1` is read-only and never mutates.
+
+## What remains before broader C2 rollout
+- **Live employer/plan-year selection**: the switcher/routes still center on mock slug ids;
+  the active employer must be a live UUID for hybrid to drive a whole screen (incl. mutations).
+- **Richer forms**: the C1 forms are intentionally minimal (name/email/relationship). Full
+  field coverage + validation UX is a later design pass, not this task.
+- **Deployed backend**: hybrid uses the local endpoint; AppSync live needs FOUNDATION-DEPLOY
+  (Cognito MFA fix + target account) + real Cognito auth in place of the dev sub shim.
+- **Non-C1 hooks/screens** (aggregate workspaces, employee self-service) remain mock-only
+  until their Phase D–F backends exist.
