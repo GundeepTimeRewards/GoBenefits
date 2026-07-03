@@ -8,7 +8,7 @@ import { getEnrollment, getOpenEnrollmentDashboard, getLaunchReadiness, getEnrol
 import { resolvePlanYearScopedSource } from "./dataSource";
 import { graphqlClient } from "./client";
 import { operations, runOperation } from "./operations";
-import { mapEnrollmentProgress, mapEnrollmentCenter, type LiveEnrollmentProgress, type LiveEnrollmentCenter, type EnrollmentCenterView } from "./liveMappers";
+import { mapEnrollmentProgress, mapEnrollmentCenter, mapElectionReview, type LiveEnrollmentProgress, type LiveEnrollmentCenter, type EnrollmentCenterView, type LiveElectionReview } from "./liveMappers";
 
 export function useEnrollmentEvents(employerId: string) {
   return useQuery({ queryKey: ["enrollmentEvents", employerId], queryFn: () => getEnrollment(employerId) });
@@ -81,8 +81,24 @@ export function useOpenEnrollmentSummary(employerId: string, planYearId: string)
   return useQuery({ queryKey: ["openEnrollmentSummary", employerId, planYearId], queryFn: () => getOpenEnrollmentSummary(employerId, planYearId) });
 }
 
+/**
+ * Elections Review (Phase E-1b). Live only when employerId + planYearId are both live
+ * UUIDs; mapped so the page's status/action unions keep working (live "Sent Back"
+ * reads as Needs Review with a View action). Mock fallback preserved.
+ */
 export function useElectionReview(employerId: string, planYearId: string) {
-  return useQuery({ queryKey: ["electionReview", employerId, planYearId], queryFn: () => getElectionReview(employerId, planYearId) });
+  const live = resolvePlanYearScopedSource("electionReview", employerId, planYearId) === "live";
+  return useQuery({
+    queryKey: ["electionReview", live ? "live" : "mock", employerId, planYearId],
+    queryFn: live
+      ? async () => {
+          const r = (await runOperation(graphqlClient, operations.electionReview, { employerId, planYearId })) as {
+            electionReview: LiveElectionReview;
+          };
+          return mapElectionReview(r.electionReview);
+        }
+      : () => getElectionReview(employerId, planYearId),
+  });
 }
 
 export function useLifeEventQueue(employerId: string, planYearId: string) {

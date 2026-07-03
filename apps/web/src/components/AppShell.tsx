@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Link, Outlet, useRouterState, useParams } from "@tanstack/react-router";
 import { Building2, HeartPulse } from "lucide-react";
 import { roleLabels } from "@/lib/role-context";
-import { useEmployer } from "@/lib/employer-context";
+import { useEmployer, useActiveEmployerId } from "@/lib/employer-context";
 import { getEmployerProfile, isKnownEmployer } from "@/lib/mock/db";
 import { useEmployer as useEmployerQuery } from "@/lib/api";
 import { DATA_SOURCE_MODE, isLiveId } from "@/lib/api/dataSource";
@@ -24,6 +24,17 @@ function NavLink({ item, label, activePath, employerId, planYearId }: { item: Na
   const candidates = (item.activeOn ?? [item.to]).map((p) => concretePath(p, employerId, planYearId));
   const active = !!activePath && candidates.includes(activePath);
   const params = item.employerScoped ? { employerId, planYearId } : undefined;
+  // Hybrid boot: an employer-scoped Link with an empty id would generate
+  // "/employers//..." (router warns + matches the wrong route). Render a
+  // non-navigable placeholder until the ids resolve.
+  if (item.employerScoped && (!employerId || (item.to.includes("$planYearId") && !planYearId))) {
+    return (
+      <span aria-disabled="true" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/50">
+        <item.icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{label}</span>
+      </span>
+    );
+  }
   return (
     <Link
       to={item.to as never}
@@ -54,6 +65,9 @@ export function AppShell() {
   const identity = useEffectiveRole();
   const role = identity.role;
   const { selectedEmployerId, setSelectedEmployerId } = useEmployer();
+  // Route-aware id — resolves on the FIRST render of a deep-linked employer page,
+  // before the sync effect below has copied the route param into the context.
+  const activeEmployerId = useActiveEmployerId();
   const { setSelectedPlanYearId } = usePlanYearCtx();
   const params = useParams({ strict: false });
   const routeEmployerId = params.employerId;
@@ -76,8 +90,8 @@ export function AppShell() {
   // Employer label/current-PY: prefer the live employer (C1 hook) when available;
   // the mock profile keeps the mock-mode render identical (the hook returns the
   // same mock profile there once resolved).
-  const liveEmployer = useEmployerQuery(selectedEmployerId).data;
-  const employer = pickEmployerProfile(liveEmployer, getEmployerProfile(selectedEmployerId));
+  const liveEmployer = useEmployerQuery(activeEmployerId).data;
+  const employer = pickEmployerProfile(liveEmployer, getEmployerProfile(activeEmployerId));
   const currentPlanYearId = employer.currentPlanYearId;
 
   // Longest matching nav path wins — resolves parent/child overlaps (e.g. /agency vs
@@ -87,7 +101,7 @@ export function AppShell() {
     for (const it of g.items) {
       const nav = NAV_ITEMS[itemKey(it)];
       for (const pat of nav.activeOn ?? [nav.to]) {
-        const p = concretePath(pat, selectedEmployerId, currentPlanYearId);
+        const p = concretePath(pat, activeEmployerId, currentPlanYearId);
         if ((pathname === p || pathname.startsWith(p + "/")) && p.length > activePath.length) activePath = p;
       }
     }
@@ -112,7 +126,7 @@ export function AppShell() {
                 {g.items.map((it) => {
                   const key = itemKey(it);
                   return (
-                    <NavLink key={key} item={NAV_ITEMS[key]} label={itemLabel(it)} activePath={activePath} employerId={selectedEmployerId} planYearId={currentPlanYearId} />
+                    <NavLink key={key} item={NAV_ITEMS[key]} label={itemLabel(it)} activePath={activePath} employerId={activeEmployerId} planYearId={currentPlanYearId} />
                   );
                 })}
               </nav>
