@@ -46,6 +46,15 @@ describe("decideDataSource", () => {
     expect(decideDataSource("hybrid", true, "employees", LIVE_ID)).toBe("live");
     expect(decideDataSource("api", true, "employer", LIVE_ID)).toBe("live"); // api behaves like hybrid
   });
+
+  test("C1 mutations are gated the same way (mock / fallback / live)", () => {
+    for (const op of ["createEmployee", "updateEmployee", "addDependent", "updateDependent", "removeDependent"]) {
+      expect(decideDataSource("mock", true, op, LIVE_ID)).toBe("mock");
+      expect(decideDataSource("hybrid", false, op, LIVE_ID)).toBe("fallback"); // live api off
+      expect(decideDataSource("hybrid", true, op, MOCK_ID)).toBe("mock"); // non-live employer id
+      expect(decideDataSource("hybrid", true, op, LIVE_ID)).toBe("live");
+    }
+  });
 });
 
 describe("resolveDataSource (env-bound default)", () => {

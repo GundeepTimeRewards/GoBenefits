@@ -83,6 +83,46 @@ async function main() {
     ok("employeeDetail/dependents (no employees to sample)", true, "skipped");
   }
 
+  // Opt-in mutation round-trip (WRITES to the DB). Off by default so read smoke never
+  // mutates. Re-run `bun local/setup.ts` afterwards to reset. Requires create/manage perms
+  // (sub-emp-admin-a / sub-broker-a).
+  if (process.env.SMOKE_MUTATIONS === "true") {
+    console.log("\n-- mutations (SMOKE_MUTATIONS=true; writes data) --");
+    const num = `SMK-${Date.now()}`;
+    const created = await gql<{ createEmployee: { employeeId: string; employeeNumber: string } }>(
+      `mutation($i: CreateEmployeeInput!){ createEmployee(input: $i){ employeeId employeeNumber } }`,
+      { i: { employerId, firstName: "Smoke", lastName: "Tester", employeeNumber: num } }
+    );
+    const newId = created.createEmployee?.employeeId;
+    ok("createEmployee returns a new employee", Boolean(newId) && created.createEmployee.employeeNumber === num, `id=${newId}`);
+
+    const upd = await gql<{ updateEmployee: { employeeId: string; lastName: string } }>(
+      `mutation($i: UpdateEmployeeInput!){ updateEmployee(input: $i){ employeeId lastName } }`,
+      { i: { employerId, employeeId: newId, firstName: "Smoke", lastName: "Tester-Updated" } }
+    );
+    ok("updateEmployee applies the change", upd.updateEmployee?.lastName === "Tester-Updated");
+
+    const dep = await gql<{ addDependent: { dependentId: string } }>(
+      `mutation($i: CreateDependentInput!){ addDependent(input: $i){ dependentId } }`,
+      { i: { employerId, employeeId: newId, firstName: "Smoke", lastName: "Kid", relationship: "child" } }
+    );
+    const depId = dep.addDependent?.dependentId;
+    ok("addDependent returns a dependent", Boolean(depId), `id=${depId}`);
+
+    const dupd = await gql<{ updateDependent: { dependentId: string; relationship: string } }>(
+      `mutation($i: UpdateDependentInput!){ updateDependent(input: $i){ dependentId relationship } }`,
+      { i: { employerId, dependentId: depId, employeeId: newId, firstName: "Smoke", lastName: "Kid", relationship: "other" } }
+    );
+    ok("updateDependent applies the change", dupd.updateDependent?.relationship === "other");
+
+    const rem = await gql<{ removeDependent: { removed: boolean } }>(
+      `mutation($e: ID!, $d: ID!){ removeDependent(employerId: $e, dependentId: $d){ removed } }`,
+      { e: employerId, d: depId }
+    );
+    ok("removeDependent removes it", rem.removeDependent?.removed === true);
+    console.log("  (note: the created employee remains — run `bun local/setup.ts` to reset the local DB)");
+  }
+
   console.log(failures === 0 ? "\nC1 smoke: ALL PASS" : `\nC1 smoke: ${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LoadingCard } from "@/components/common";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useEmployer, useEmployeeDetail } from "@/lib/api";
+import { EditEmployeeForm, DependentManager } from "@/components/census/C1MutationForms";
 import { ageFromDob, employmentStatusLabel, type EmployeeDetail, type Dependent } from "@/lib/census-mock";
 
 // --- helpers ----------------------------------------------------------------
@@ -248,7 +249,7 @@ function EmployeeProfile({ employerId, employerName, e }: { employerId: string; 
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" size="sm"><Edit className="mr-1.5 h-4 w-4" />Edit Employee</Button>
+            <EditEmployeeForm employerId={employerId} employee={e} trigger={<Button variant="outline" size="sm"><Edit className="mr-1.5 h-4 w-4" />Edit Employee</Button>} />
             <Button variant="outline" size="sm"><PlayCircle className="mr-1.5 h-4 w-4" />Start Enrollment Event</Button>
             <Button variant="outline" size="sm"><Send className="mr-1.5 h-4 w-4" />Send Reminder</Button>
             <Button size="sm"><ExternalLink className="mr-1.5 h-4 w-4" />View Employee Portal</Button>
@@ -349,10 +350,10 @@ function EmployeeProfile({ employerId, employerName, e }: { employerId: string; 
 
         {/* Dependents */}
         <TabsContent value="dependents" className="space-y-4">
+          {/* C1 functional add/edit/remove (hybrid-live; no-op in mock mode). */}
+          <DependentManager employerId={employerId} employeeId={e.employeeId} dependents={deps} />
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm"><CheckCircle2 className="mr-1.5 h-4 w-4" />Verify Dependents</Button>
-            <Button variant="outline" size="sm"><Edit className="mr-1.5 h-4 w-4" />Edit Dependent</Button>
-            <Button size="sm"><Plus className="mr-1.5 h-4 w-4" />Add Dependent</Button>
           </div>
           {deps.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">No dependents on file.</CardContent></Card>

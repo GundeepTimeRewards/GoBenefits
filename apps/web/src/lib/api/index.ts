@@ -15,3 +15,4 @@ export * from "./config";
 export * from "./client";
 export * from "./operations";
 export * from "./dataSource";
+export * from "./mutationHooks";
