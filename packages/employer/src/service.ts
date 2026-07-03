@@ -21,6 +21,8 @@ import {
 } from "./plan-catalog.js";
 import * as planMutRepo from "./plan-mutation-repository.js";
 import * as enrollMutRepo from "./enrollment-mutation-repository.js";
+import * as reviewRepo from "./election-review-repository.js";
+import { buildElectionReview, deriveReviewRow, type ElectionReview, type ElectionReviewRow } from "./election-review.js";
 import { randomUUID } from "node:crypto";
 import {
   buildEnrollmentProgress,
@@ -328,6 +330,110 @@ export async function updateContributionRule(
     name: input.name?.trim(),
   });
   return { ok: true, message: "Contribution rule updated", id };
+}
+
+/**
+ * Elections Review read model (Phase E-1) — the HR exception queue. Authorizes on
+ * `election.read` (employer_admin, broker, agency all hold it), fail-closed inside
+ * getCustomerDb. Rows are per election; issues derive server-side (see
+ * election-review.ts); waiver count comes from the dedicated waiver table.
+ */
+export async function electionReview(ctx: AuthContext, employerId: string, planYearId: string): Promise<ElectionReview> {
+  const { db } = await getCustomerDb(ctx, "election.read", employerId);
+  // The queue exposes OTHER employees' elections. `election.read` alone also covers
+  // employee self-service (own rows, Phase E self resolvers), so the HR queue
+  // additionally requires the employee-LIST permission — the same one the seed
+  // deliberately withholds from the employee role (see 0002's census note).
+  if (!ctx.permissions.has("employee.read")) {
+    throw new AuthError("Missing permission: employee.read (election review is an HR/broker surface)");
+  }
+  const [pyStatus, rows, waivers] = await Promise.all([
+    planYearStatusOf(db, planYearId),
+    reviewRepo.listReviewRows(db, planYearId),
+    reviewRepo.waiverCount(db, planYearId),
+  ]);
+  return buildElectionReview(employerId, planYearId, pyStatus, rows, waivers);
+}
+
+/** Shared guard for the per-election review mutations. */
+async function reviewableElection(
+  db: import("mysql2/promise").Pool,
+  planYearId: string | null,
+  electionId: string
+): Promise<{ id: string; status: string; reviewFlag: string; planYearId: string }> {
+  const el = await reviewRepo.getElectionMeta(db, electionId);
+  if (!el || (planYearId != null && el.planYearId !== planYearId)) {
+    throw new ValidationError("Election not found for this employer / plan year");
+  }
+  return el;
+}
+
+/**
+ * Approve one submitted election (Phase E-1). Authorizes on `election.manage`
+ * (employer_admin only — brokers are read-only in the review queue). Blocks while
+ * an EOI / dependent-document request is open; a missing cost does NOT block a
+ * deliberate single approval (it does block approve-all).
+ */
+export async function approveElection(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  electionId: string
+): Promise<ElectionReviewRow> {
+  const { db } = await getCustomerDb(ctx, "election.manage", employerId);
+  const el = await reviewableElection(db, planYearId, electionId);
+  if (el.status !== "submitted") throw new ValidationError("Only submitted elections can be approved");
+  if (el.reviewFlag !== "none") {
+    throw new ValidationError("Resolve the open EOI / document request before approving");
+  }
+  await reviewRepo.approveElection(db, electionId);
+  return deriveReviewRow((await reviewRepo.getReviewRow(db, planYearId, electionId))!);
+}
+
+/** Send an election back to the employee (Phase E-1): clears any open request. */
+export async function sendBackElection(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  electionId: string,
+  note?: string | null
+): Promise<ElectionReviewRow> {
+  const { db } = await getCustomerDb(ctx, "election.manage", employerId);
+  const el = await reviewableElection(db, planYearId, electionId);
+  if (el.status !== "submitted") throw new ValidationError("Only submitted elections can be sent back");
+  await reviewRepo.sendBackElection(db, electionId, note?.trim() || "Sent back for changes");
+  return deriveReviewRow((await reviewRepo.getReviewRow(db, planYearId, electionId))!);
+}
+
+/** Flag a submitted election as awaiting EOI (Phase E-1). */
+export async function requestEoi(ctx: AuthContext, employerId: string, electionId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "election.manage", employerId);
+  const el = await reviewableElection(db, null, electionId);
+  if (el.status !== "submitted") throw new ValidationError("Only submitted elections can have EOI requested");
+  await reviewRepo.setReviewFlag(db, electionId, "eoi_requested");
+  return { ok: true, message: "Evidence of insurability requested", id: electionId };
+}
+
+/** Flag a submitted election as awaiting dependent documents (Phase E-1). */
+export async function requestDependentDocs(ctx: AuthContext, employerId: string, electionId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "election.manage", employerId);
+  const el = await reviewableElection(db, null, electionId);
+  if (el.status !== "submitted") throw new ValidationError("Only submitted elections can have documents requested");
+  await reviewRepo.setReviewFlag(db, electionId, "docs_requested");
+  return { ok: true, message: "Dependent documents requested", id: electionId };
+}
+
+/**
+ * Bulk-approve every clean submitted election (Phase E-1): no open request AND a
+ * computed cost — the bulk path never approves a row a human would hesitate on.
+ */
+export async function approveAllReadyElections(ctx: AuthContext, employerId: string, planYearId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "election.manage", employerId);
+  const pyStatus = await planYearStatusOf(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  const n = await reviewRepo.approveAllReady(db, planYearId);
+  return { ok: true, message: `${n} election(s) approved`, id: null };
 }
 
 const WINDOW_TYPES = new Set(["open_enrollment", "new_hire", "life_event"]);
