@@ -135,6 +135,17 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "approveAllReadyElections":
       return employerService.approveAllReadyElections(ctx, a.employerId, a.planYearId);
 
+    // --- Payroll data + ACA lookback (Phase E-5) — payroll.read/manage, employer-only ---
+    case "payrollDataWorkspace":
+      return employerService.payrollDataWorkspace(ctx, a.employerId, a.planYearId);
+    case "importPayrollData":
+      return employerService.importPayrollData(ctx, a.employerId, a.input);
+    case "syncPayrollProvider":
+      return employerService.syncPayrollProvider(ctx, a.employerId);
+    case "runAcaLookback":
+    case "recalculateLookback":
+      return employerService.runAcaLookback(ctx, a.employerId, a.planYearId);
+
     // --- Documents (Phase E-3, metadata-first) — documents.read / documents.manage ---
     case "documentWorkspace":
       return employerService.documentWorkspace(ctx, a.employerId, a.planYearId);

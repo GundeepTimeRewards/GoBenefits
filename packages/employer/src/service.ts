@@ -25,6 +25,7 @@ import * as reviewRepo from "./election-review-repository.js";
 import * as deductionRepo from "./deduction-repository.js";
 import * as lifeEventRepo from "./life-event-repository.js";
 import * as docRepo from "./document-repository.js";
+import * as payrollDataRepo from "./payroll-data-repository.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -891,6 +892,181 @@ export async function generateConfirmations(
     await docRepo.insertSignatureRequest(db, docId, e.employeeId);
   }
   return { jobId: randomUUID(), status: `completed: ${employees.length} confirmation(s) generated` };
+}
+
+export type PayrollDataWorkspace = {
+  employerId: string;
+  planYearId: string;
+  readOnly: boolean;
+  connection: {
+    provider: string; frequency: string; currentGroup: string | null;
+    firstImported: string | null; lastImported: string | null;
+    measurementPeriod: string | null; stabilityPeriod: string | null;
+    lastSync: string | null; nextSync: string | null; dataSource: string | null;
+    connected: boolean; lookbackReady: boolean;
+  };
+  importSummary: { importedPayPeriods: number; matchedEmployees: number; unmatchedEmployees: number; lastSyncStatus: string };
+  readiness: { percent: number; issues: { key: string; label: string; count: number; tone: string }[] };
+  aca: {
+    measurementPeriod: string; stabilityPeriod: string; administrativePeriod: string | null;
+    calcStatus: string | null; lastCalculated: string | null;
+    fullTimeDeterminationStatus: string | null; affordabilityStatus: string | null; form1095Status: string | null;
+  };
+  payPeriods: { id: string; period: string; payDate: string | null; group: string | null; employees: number; hours: string; wages: string; status: string; issues: number; source: string }[];
+  employeeRecords: { id: string; name: string; employeeNumber: string | null; group: string | null; matchedCensus: string; hours: string; wages: string; aca: string; issues: string | null; lastImported: string | null }[];
+  settings: { provider: string | null; frequency: string | null; deductionSchedule: string | null; payrollGroups: string | null; codeMapping: string | null; syncSettings: string | null; exportFormat: string | null };
+};
+
+function periodLabel(start: string | null, end: string | null): string {
+  return start && end ? `${start} – ${end}` : "Not calculated";
+}
+
+/**
+ * Payroll Data workspace (Phase E-5) — imported hours/wages + the ACA lookback the
+ * imports feed. `payroll.read` (employer-level only, per 0008). Everything is
+ * assembled from the import staging tables + employee_aca; no mock numbers.
+ */
+export async function payrollDataWorkspace(ctx: AuthContext, employerId: string, planYearId: string): Promise<PayrollDataWorkspace> {
+  const { db } = await getCustomerDb(ctx, "payroll.read", employerId);
+  const [pyStatus, stats, batches, records, aca, [settingsRows]] = await Promise.all([
+    planYearStatusOf(db, planYearId),
+    payrollDataRepo.importStats(db),
+    payrollDataRepo.listBatches(db),
+    payrollDataRepo.listEmployeeRecords(db),
+    payrollDataRepo.acaSummary(db),
+    db.query(`SELECT default_frequency AS freq, sync_quickbooks AS qb FROM employer_payroll_settings LIMIT 1`),
+  ]);
+  const settings = (settingsRows as any[])[0] ?? null;
+  const unmatchedIssue = stats.unmatchedRows;
+  const noImports = stats.batches === 0;
+  const staleAca = stats.batches > 0 && aca.evaluated === 0;
+  const issues = [
+    { key: "no_imports", label: "No payroll data imported yet", count: noImports ? 1 : 0, tone: "danger" },
+    { key: "unmatched_rows", label: "Import rows with no census match", count: unmatchedIssue, tone: "warning" },
+    { key: "lookback_not_run", label: "ACA lookback not calculated for imported data", count: staleAca ? 1 : 0, tone: "warning" },
+  ].filter((i) => i.count > 0);
+  const percent = noImports ? 0 : Math.max(0, 100 - (unmatchedIssue > 0 ? 25 : 0) - (staleAca ? 25 : 0));
+
+  return {
+    employerId,
+    planYearId,
+    readOnly: pyStatus === "archived",
+    connection: {
+      provider: settings?.qb ? "QuickBooks" : "Manual / CSV",
+      frequency: settings?.freq ?? "26",
+      currentGroup: null,
+      firstImported: stats.firstImported,
+      lastImported: stats.lastImported,
+      measurementPeriod: periodLabel(aca.measurementStart, aca.measurementEnd),
+      stabilityPeriod: periodLabel(aca.stabilityStart, aca.stabilityEnd),
+      lastSync: stats.lastImported,
+      nextSync: null, // provider sync is a prod integration; no schedule locally
+      dataSource: settings?.qb ? "QuickBooks sync" : "Manual import",
+      connected: Boolean(settings?.qb),
+      lookbackReady: stats.batches > 0,
+    },
+    importSummary: {
+      importedPayPeriods: stats.batches,
+      matchedEmployees: stats.matchedEmployees,
+      unmatchedEmployees: stats.unmatchedRows,
+      lastSyncStatus: stats.lastStatus ?? "never",
+    },
+    readiness: { percent, issues },
+    aca: {
+      measurementPeriod: periodLabel(aca.measurementStart, aca.measurementEnd),
+      stabilityPeriod: periodLabel(aca.stabilityStart, aca.stabilityEnd),
+      administrativePeriod: null,
+      calcStatus: aca.evaluated > 0 ? "complete" : "not_run",
+      lastCalculated: aca.evaluated > 0 ? aca.measurementEnd : null,
+      fullTimeDeterminationStatus: aca.evaluated > 0 ? `${aca.fullTime} of ${aca.evaluated} full-time` : null,
+      affordabilityStatus: null, // Phase F (needs safe-harbor wage inputs)
+      form1095Status: null, // Phase F
+    },
+    payPeriods: batches.map((b) => ({
+      id: b.id, period: b.period, payDate: b.payDate, group: null, employees: b.employees,
+      hours: b.hours.toFixed(2), wages: fmtMoney(b.wages), status: b.status, issues: b.issues, source: b.source,
+    })),
+    employeeRecords: records.map((r) => ({
+      id: r.employeeId, name: r.name, employeeNumber: r.employeeNumber, group: null,
+      matchedCensus: "Matched",
+      hours: r.totalHours.toFixed(2), wages: fmtMoney(r.totalWages),
+      aca: r.acaEligible == null ? "Not calculated" : r.acaEligible ? `Full-time (${r.lookbackHours} hrs/mo avg)` : `Not full-time (${r.lookbackHours} hrs/mo avg)`,
+      issues: null, lastImported: r.lastImported,
+    })),
+    settings: {
+      provider: settings?.qb ? "QuickBooks" : "Manual / CSV",
+      frequency: settings?.freq ?? null,
+      deductionSchedule: null, payrollGroups: null, codeMapping: null, syncSettings: null, exportFormat: null,
+    },
+  };
+}
+
+/**
+ * Import one pay period of payroll rows (Phase E-5). `payroll.manage`. Contract
+ * finalized from the arg-less stub: rows come in the payload; census matching is by
+ * employee_number; unmatched rows are staged + counted, never dropped.
+ */
+export async function importPayrollData(
+  ctx: AuthContext,
+  employerId: string,
+  input: { source: string; fileName?: string | null; periodStart: string; periodEnd: string; payDate?: string | null; rows: payrollDataRepo.PayrollRowInput[] }
+): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "payroll.manage", employerId);
+  if (!input.source?.trim()) throw new ValidationError("source is required");
+  for (const [f, v] of [["periodStart", input.periodStart], ["periodEnd", input.periodEnd]] as const) {
+    if (!ISO_DATE.test(v ?? "")) throw new ValidationError(`${f} must be YYYY-MM-DD`);
+  }
+  if (input.periodStart > input.periodEnd) throw new ValidationError("periodStart must be on or before periodEnd");
+  if (!input.rows?.length) throw new ValidationError("At least one payroll row is required");
+  if (input.rows.length > 5000) throw new ValidationError("At most 5000 rows per import");
+  for (const [i, r] of input.rows.entries()) {
+    if (!r.employeeNumber?.trim()) throw new ValidationError(`Row ${i + 1}: employeeNumber is required`);
+    if (typeof r.hours !== "number" || r.hours < 0 || r.hours > 1000) throw new ValidationError(`Row ${i + 1}: hours must be 0–1000`);
+    if (r.wages != null && (typeof r.wages !== "number" || r.wages < 0)) throw new ValidationError(`Row ${i + 1}: wages must be non-negative`);
+  }
+  const res = await payrollDataRepo.importBatch(db, {
+    source: input.source.trim(),
+    fileName: input.fileName?.trim() || null,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    payDate: input.payDate ?? null,
+    rows: input.rows,
+  });
+  return {
+    jobId: res.batchId,
+    status: `completed: ${res.matched} matched, ${res.unmatched} unmatched row(s) imported`,
+  };
+}
+
+/** Provider sync (Phase E-5). Local has no provider credentials — reports honestly. */
+export async function syncPayrollProvider(ctx: AuthContext, employerId: string): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "payroll.manage", employerId);
+  const [rows] = await db.query(`SELECT sync_quickbooks AS qb FROM employer_payroll_settings LIMIT 1`);
+  const connected = Boolean((rows as any[])[0]?.qb);
+  return {
+    jobId: randomUUID(),
+    status: connected
+      ? "queued: QuickBooks sync runs in the prod integration pipeline"
+      : "skipped: no payroll provider connected — use importPayrollData",
+  };
+}
+
+/**
+ * ACA lookback (Phase E-5, approved into Phase E). `payroll.manage`. Standard
+ * 12-month measurement ending at the latest imported period; full-time at avg
+ * >= 130 hrs/month (§4980H); results land on employee_aca (feeding the census ACA
+ * fields and, in Phase F, affordability + 1095-C). recalculateLookback re-runs the
+ * same computation over current imports.
+ */
+export async function runAcaLookback(ctx: AuthContext, employerId: string, planYearId: string): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "payroll.manage", employerId);
+  const pyStatus = await planYearStatusOf(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  const res = await payrollDataRepo.runLookback(db);
+  if (res.evaluated === 0) {
+    return { jobId: randomUUID(), status: "completed: no imported payroll hours to measure — import payroll data first" };
+  }
+  return { jobId: randomUUID(), status: `completed: ${res.evaluated} employee(s) measured, ${res.fullTime} full-time` };
 }
 
 /** Age in whole years at a date (nulls → null: composite rates only). */

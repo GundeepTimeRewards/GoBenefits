@@ -863,8 +863,14 @@ type Mutation {
   mapDeductionCode(employerId: ID!, deductionId: ID!, code: String!): DeductionReviewRow
   exportReadyDeductions(employerId: ID!, planYearId: ID!): JobHandle
   reconcileBatch(employerId: ID!, batchId: ID!): ExportBatch
+  ## (Phase E-5 — IMPLEMENTED) importPayrollData finalized from the arg-less stub: a
+  ## pay period's rows come in the payload; census matching is by employee_number and
+  ## unmatched rows are staged + counted, never dropped. runAcaLookback: 12-month
+  ## standard measurement ending at the latest imported period; FT at avg >= 130
+  ## hrs/month (§4980H); writes employee_aca; recalculateLookback re-runs the same
+  ## computation. syncPayrollProvider reports not-connected locally (prod = ADP/QB).
   syncPayrollProvider(employerId: ID!): JobHandle
-  importPayrollData(employerId: ID!, planYearId: ID!): JobHandle
+  importPayrollData(employerId: ID!, input: ImportPayrollInput!): JobHandle
   runAcaLookback(employerId: ID!, planYearId: ID!): JobHandle
   recalculateLookback(employerId: ID!, planYearId: ID!): JobHandle
 
@@ -885,6 +891,22 @@ input CreateEnrollmentWindowInput {
   windowStart: AWSDate!
   windowEnd: AWSDate!
   effectiveDate: AWSDate
+}
+
+## importPayrollData payload (Phase E-5): one pay period's rows. employeeNumber is
+## the census match key; wages optional.
+input PayrollRowInput {
+  employeeNumber: String!
+  hours: Float!
+  wages: Float
+}
+input ImportPayrollInput {
+  source: String!
+  fileName: String
+  periodStart: AWSDate!
+  periodEnd: AWSDate!
+  payDate: AWSDate
+  rows: [PayrollRowInput!]!
 }
 
 ## One rate band for importRates: age = null for composite (non-age-banded) rates.
