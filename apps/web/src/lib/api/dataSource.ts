@@ -48,6 +48,10 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "addDependent",
   "updateDependent",
   "removeDependent",
+  "createPlanYear", // Phase D-5 (plan-year lifecycle)
+  "copyFromPriorYear",
+  "activatePlanYear",
+  "archivePlanYear",
 ]);
 
 export type DataSourceResolution = "mock" | "live" | "fallback";

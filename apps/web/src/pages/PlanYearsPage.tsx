@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import {
-  CalendarRange, Copy, Plus, Users, ShieldCheck, ArrowRight, AlertTriangle, Activity, Layers, Info,
+  CalendarRange, Users, ShieldCheck, ArrowRight, AlertTriangle, Activity, Layers, Info,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { LoadingCard } from "@/components/common";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useEmployer, usePlanYears, usePlanYearActivity } from "@/lib/api";
+import { NewPlanYearForm, CopyFromPriorYearForm } from "@/components/plan-years/PlanYearForms";
 import type { PlanYearRow } from "@/lib/mock/db";
 
 const statusStyle: Record<PlanYearRow["status"], string> = {
@@ -116,9 +117,9 @@ export function PlanYearsPage() {
             Employer: <span className="font-medium text-foreground">{employer.name}</span>
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5"><Copy className="h-4 w-4" /> Copy From Prior Year</Button>
-          <Button size="sm" className="gap-1.5"><Plus className="h-4 w-4" /> New Plan Year</Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <CopyFromPriorYearForm employerId={employerId} years={years} />
+          <NewPlanYearForm employerId={employerId} />
         </div>
       </div>
 

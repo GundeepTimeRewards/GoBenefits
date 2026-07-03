@@ -49,3 +49,20 @@ describe("C1 mutation operation variable mapping", () => {
       .toEqual({ employerId: "e1", dependentId: "dep7" });
   });
 });
+
+describe("plan-year lifecycle mutation variable mapping (Phase D-5)", () => {
+  test("createPlanYear passes employerId + year + label", () => {
+    expect(operations.createPlanYear.buildVariables({ employerId: "e1", year: 2027, label: "PY 2027" }))
+      .toEqual({ employerId: "e1", year: 2027, label: "PY 2027" });
+  });
+  test("copyFromPriorYear passes employerId + fromPlanYearId + toYear", () => {
+    expect(operations.copyFromPriorYear.buildVariables({ employerId: "e1", fromPlanYearId: "py26", toYear: 2027 }))
+      .toEqual({ employerId: "e1", fromPlanYearId: "py26", toYear: 2027 });
+  });
+  test("activate/archive pass employerId + planYearId", () => {
+    expect(operations.activatePlanYear.buildVariables({ employerId: "e1", planYearId: "py27" }))
+      .toEqual({ employerId: "e1", planYearId: "py27" });
+    expect(operations.archivePlanYear.buildVariables({ employerId: "e1", planYearId: "py26" }))
+      .toEqual({ employerId: "e1", planYearId: "py26" });
+  });
+});

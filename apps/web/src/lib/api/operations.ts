@@ -73,6 +73,9 @@ export type UpdateDependentInput = Omit<CreateDependentInput, "employeeId"> & {
   employeeId?: string;
 };
 export type PlanDetailArgs = { employerId: string; planYearId: string; planId: string };
+export type CreatePlanYearArgs = { employerId: string; year: number; label: string };
+export type CopyFromPriorYearArgs = { employerId: string; fromPlanYearId: string; toYear: number };
+export type PlanYearLifecycleArgs = { employerId: string; planYearId: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -190,6 +193,22 @@ const REMOVE_DEPENDENT = `mutation RemoveDependent($employerId: ID!, $dependentI
   removeDependent(employerId: $employerId, dependentId: $dependentId) { removed }
 }`;
 
+// Plan-year lifecycle mutations (Phase D-5). All return the same PlanYear selection the
+// `planYears` read uses (aggregate/OE fields refresh via invalidation, not this payload).
+const PLAN_YEAR_MUTATION_FIELDS = `{ id label year status periodStart periodEnd planCount }`;
+const CREATE_PLAN_YEAR = `mutation CreatePlanYear($employerId: ID!, $year: Int!, $label: String!) {
+  createPlanYear(employerId: $employerId, year: $year, label: $label) ${PLAN_YEAR_MUTATION_FIELDS}
+}`;
+const COPY_FROM_PRIOR_YEAR = `mutation CopyFromPriorYear($employerId: ID!, $fromPlanYearId: ID!, $toYear: Int!) {
+  copyFromPriorYear(employerId: $employerId, fromPlanYearId: $fromPlanYearId, toYear: $toYear) ${PLAN_YEAR_MUTATION_FIELDS}
+}`;
+const ACTIVATE_PLAN_YEAR = `mutation ActivatePlanYear($employerId: ID!, $planYearId: ID!) {
+  activatePlanYear(employerId: $employerId, planYearId: $planYearId) ${PLAN_YEAR_MUTATION_FIELDS}
+}`;
+const ARCHIVE_PLAN_YEAR = `mutation ArchivePlanYear($employerId: ID!, $planYearId: ID!) {
+  archivePlanYear(employerId: $employerId, planYearId: $planYearId) ${PLAN_YEAR_MUTATION_FIELDS}
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -214,6 +233,10 @@ export const operations = {
   addDependent: { name: "addDependent", kind: "mutation", document: ADD_DEPENDENT, buildVariables: (a: { input: CreateDependentInput }) => ({ input: compact(a.input) }) } as C1Operation<{ input: CreateDependentInput }, unknown>,
   updateDependent: { name: "updateDependent", kind: "mutation", document: UPDATE_DEPENDENT, buildVariables: (a: { input: UpdateDependentInput }) => ({ input: compact(a.input) }) } as C1Operation<{ input: UpdateDependentInput }, unknown>,
   removeDependent: { name: "removeDependent", kind: "mutation", document: REMOVE_DEPENDENT, buildVariables: (a: RemoveDependentArgs) => ({ employerId: a.employerId, dependentId: a.dependentId }) } as C1Operation<RemoveDependentArgs, unknown>,
+  createPlanYear: { name: "createPlanYear", kind: "mutation", document: CREATE_PLAN_YEAR, buildVariables: (a: CreatePlanYearArgs) => ({ employerId: a.employerId, year: a.year, label: a.label }) } as C1Operation<CreatePlanYearArgs, unknown>,
+  copyFromPriorYear: { name: "copyFromPriorYear", kind: "mutation", document: COPY_FROM_PRIOR_YEAR, buildVariables: (a: CopyFromPriorYearArgs) => ({ employerId: a.employerId, fromPlanYearId: a.fromPlanYearId, toYear: a.toYear }) } as C1Operation<CopyFromPriorYearArgs, unknown>,
+  activatePlanYear: { name: "activatePlanYear", kind: "mutation", document: ACTIVATE_PLAN_YEAR, buildVariables: (a: PlanYearLifecycleArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearLifecycleArgs, unknown>,
+  archivePlanYear: { name: "archivePlanYear", kind: "mutation", document: ARCHIVE_PLAN_YEAR, buildVariables: (a: PlanYearLifecycleArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearLifecycleArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;
