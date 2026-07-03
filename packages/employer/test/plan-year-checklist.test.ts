@@ -25,8 +25,10 @@ function def(stepKey: string, over: Partial<StepDefinition> = {}): StepDefinitio
 }
 const D2_EMPTY = { planCount: 0, completePlanCount: 0, rateCount: 0, contributionRuleCount: 0, optionCount: 0 };
 const D2_FULL = { planCount: 2, completePlanCount: 2, rateCount: 2, contributionRuleCount: 1, optionCount: 2 };
-const EMPTY: DomainState = { planYearExists: true, planYearStatus: "setup", employeeCount: 0, ...D2_EMPTY };
-const POPULATED: DomainState = { planYearExists: true, planYearStatus: "active", employeeCount: 5, ...D2_EMPTY };
+const D3_EMPTY = { windowCount: 0, invitationSentCount: 0, submittedElectionCount: 0, waiverCount: 0 };
+const D3_FULL = { windowCount: 1, invitationSentCount: 3, submittedElectionCount: 2, waiverCount: 1 };
+const EMPTY: DomainState = { planYearExists: true, planYearStatus: "setup", employeeCount: 0, ...D2_EMPTY, ...D3_EMPTY };
+const POPULATED: DomainState = { planYearExists: true, planYearStatus: "active", employeeCount: 5, ...D2_EMPTY, ...D3_EMPTY };
 
 describe("deriveStepStatus (v1 + D-2 rules)", () => {
   test("census_imported reflects employee count", () => {
@@ -50,9 +52,17 @@ describe("deriveStepStatus (v1 + D-2 rules)", () => {
     expect(deriveStepStatus(def("options_configured"), { ...EMPTY, optionCount: 3 })).toBe("complete");
     expect(deriveStepStatus(def("options_configured"), EMPTY)).toBe("not_started");
   });
+  test("D-3: window/invitations/elections/waivers light up from OE-event counts", () => {
+    expect(deriveStepStatus(def("window_configured"), { ...EMPTY, windowCount: 1 })).toBe("complete");
+    expect(deriveStepStatus(def("window_configured"), EMPTY)).toBe("not_started");
+    expect(deriveStepStatus(def("invitations_sent"), { ...EMPTY, invitationSentCount: 3 })).toBe("complete");
+    expect(deriveStepStatus(def("elections_reviewed"), { ...EMPTY, submittedElectionCount: 2 })).toBe("complete");
+    expect(deriveStepStatus(def("waivers_reviewed"), { ...EMPTY, waiverCount: 1 })).toBe("complete");
+    expect(deriveStepStatus(def("invitations_sent"), EMPTY)).toBe("not_started");
+  });
   test("still-unwired domains return not_started (never faked)", () => {
-    for (const k of ["documents_configured", "window_configured", "invitations_sent", "payroll_reviewed"]) {
-      expect(deriveStepStatus(def(k), { ...POPULATED, ...D2_FULL })).toBe("not_started");
+    for (const k of ["documents_configured", "communications_configured", "payroll_reviewed", "carrier_exports_generated"]) {
+      expect(deriveStepStatus(def(k), { ...POPULATED, ...D2_FULL, ...D3_FULL })).toBe("not_started");
     }
   });
 });

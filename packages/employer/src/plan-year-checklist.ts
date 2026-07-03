@@ -58,6 +58,11 @@ export type DomainState = {
   rateCount: number; // plan_rate rows across the PY's plans
   contributionRuleCount: number; // contribution_rule rows (employer-level)
   optionCount: number; // plan_option rows across the PY's plans
+  // D-3 (Enrollment) — scoped to the PY's open-enrollment event.
+  windowCount: number; // enrollment_window rows for the OE event
+  invitationSentCount: number; // enrollment_invitation rows with status >= sent
+  submittedElectionCount: number; // employee_election rows submitted/approved
+  waiverCount: number; // waiver rows for the OE event
 };
 
 /** GraphQL `ChecklistStep` (field names match the SDL — note `key`, not `stepKey`). */
@@ -89,6 +94,9 @@ export type PlanYearSetupStatus = {
  *   - D-2 Plans & Rates: `plans_configured` (complete when a plan is fully set up,
  *     in_progress while plans exist but none complete), `options_configured`,
  *     `rates_configured`, `contributions_configured` — presence-based from real rows.
+ *   - D-3 Enrollment: `window_configured` (an enrollment window exists),
+ *     `invitations_sent` (any invite sent), `elections_reviewed` (any submitted election),
+ *     `waivers_reviewed` (any waiver) — presence-based from the OE event.
  *   - everything else    → not_started (its domain isn't wired yet; honest, not faked).
  */
 export function deriveStepStatus(def: StepDefinition, domain: DomainState): ChecklistStatus {
@@ -106,6 +114,14 @@ export function deriveStepStatus(def: StepDefinition, domain: DomainState): Chec
       return domain.rateCount > 0 ? "complete" : "not_started";
     case "contributions_configured":
       return domain.contributionRuleCount > 0 ? "complete" : "not_started";
+    case "window_configured":
+      return domain.windowCount > 0 ? "complete" : "not_started";
+    case "invitations_sent":
+      return domain.invitationSentCount > 0 ? "complete" : "not_started";
+    case "elections_reviewed":
+      return domain.submittedElectionCount > 0 ? "complete" : "not_started";
+    case "waivers_reviewed":
+      return domain.waiverCount > 0 ? "complete" : "not_started";
     default:
       return "not_started";
   }

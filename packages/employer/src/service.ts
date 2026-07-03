@@ -9,6 +9,7 @@ import { getCustomerDb, controlPlanePool, AuthError, type AuthContext } from "@g
 import * as repo from "./plan-year-repository.js";
 import * as setupRepo from "./plan-year-setup-repository.js";
 import * as catalogRepo from "./plan-catalog-repository.js";
+import * as enrollmentRepo from "./enrollment-repository.js";
 import { deriveChecklist, type PlanYearSetupStatus } from "./plan-year-checklist.js";
 import {
   buildPlanCatalog,
@@ -17,6 +18,12 @@ import {
   type PlanCatalog,
   type BenefitPlanDetail,
 } from "./plan-catalog.js";
+import {
+  buildEnrollmentProgress,
+  buildEnrollmentCenter,
+  type EnrollmentProgress,
+  type EnrollmentCenter,
+} from "./enrollment.js";
 import type { Employer, PlanYear } from "./types.js";
 
 /** All plan years for an employer (top-bar plan-year selector + Plan Years overview). */
@@ -101,6 +108,38 @@ export async function benefitPlanDetail(
 async function planYearStatusOf(db: import("mysql2/promise").Pool, planYearId: string): Promise<string | null> {
   const [rows] = await db.query(`SELECT status FROM plan_year WHERE id = UUID_TO_BIN(:planYearId) LIMIT 1`, { planYearId });
   return (rows as any[])[0]?.status ?? null;
+}
+
+/**
+ * Enrollment Progress (Phase D-3) — server-computed live progress for the plan year's
+ * open-enrollment event. Authorizes on `enrollment.read` (broker gained this in 0005;
+ * employer_admin already had it), fail-closed inside getCustomerDb. Read-only.
+ */
+export async function enrollmentProgress(ctx: AuthContext, employerId: string, planYearId: string): Promise<EnrollmentProgress> {
+  const { db } = await getCustomerDb(ctx, "enrollment.read", employerId);
+  const cp = await controlPlanePool();
+  const event = await enrollmentRepo.getOeEvent(db, planYearId);
+  const { counts } = await enrollmentRepo.getEnrollmentCounts(db, cp, planYearId, event);
+  return buildEnrollmentProgress(employerId, planYearId, counts);
+}
+
+/**
+ * Enrollment Center (Phase D-3) — the aggregate: launchState + launchReadiness (reuses
+ * the D-1 checklist) + openEnrollmentSummary + windows + ongoingWork. Same authorization
+ * (`enrollment.read`) and routing. Backend-ready in D-3; its FE consolidation is D-3b.
+ */
+export async function enrollmentCenter(ctx: AuthContext, employerId: string, planYearId: string): Promise<EnrollmentCenter> {
+  const { db } = await getCustomerDb(ctx, "enrollment.read", employerId);
+  const cp = await controlPlanePool();
+  const event = await enrollmentRepo.getOeEvent(db, planYearId);
+  const [{ counts }, defs, overrides, domain] = await Promise.all([
+    enrollmentRepo.getEnrollmentCounts(db, cp, planYearId, event),
+    setupRepo.listStepDefinitions(cp),
+    setupRepo.listStepOverrides(db, planYearId),
+    setupRepo.planYearSetupState(db, planYearId),
+  ]);
+  const checklist = deriveChecklist(employerId, planYearId, defs, overrides, domain);
+  return buildEnrollmentCenter(employerId, planYearId, event?.eventId ?? null, counts, checklist);
 }
 
 /**

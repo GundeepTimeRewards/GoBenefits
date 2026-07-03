@@ -109,6 +109,37 @@ describe("createDevSchema dispatch", () => {
     expect(calls[1].arguments).toMatchObject({ employerId: "e", planYearId: "py", planId: "p" });
   });
 
+  test("dispatches enrollmentProgress + enrollmentCenter (Phase D-3)", async () => {
+    const calls: any[] = [];
+    const fake: ResolverHandler = async (event) => {
+      calls.push(event);
+      if (event.info.fieldName === "enrollmentProgress") {
+        return { employerId: "e", planYearId: "py", status: "In Progress", submitted: 2, inProgress: 1, notStarted: 0, notInvited: 1,
+          byCoverage: [{ name: "Medical", elected: 2, waived: 0, pending: 1 }], reminders: null, byBenefit: null };
+      }
+      return { employerId: "e", planYearId: "py", launchState: "launched",
+        launchReadiness: { planYearStatus: "active", readinessPercent: 53, canLaunch: true, launchState: "launched", blockers: [], warnings: [], checklist: [] },
+        openEnrollmentSummary: { completionPercent: 50, eligible: 4, submitted: 2, inProgress: 1, notStarted: 0, needsAction: 1, enrolled: 2, waived: 1, lateMissing: 1, carrierFilesStatus: "Not started" },
+        windows: [], ongoingWork: [] };
+    };
+    const schema = createDevSchema(fake);
+    const prog = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!){ enrollmentProgress(employerId: $e, planYearId: $py) { status submitted notInvited byCoverage { name elected } } }`,
+      variableValues: { e: "e", py: "py" }, contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(prog.errors).toBeUndefined();
+    expect((prog.data as any).enrollmentProgress.submitted).toBe(2);
+    const center = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!){ enrollmentCenter(employerId: $e, planYearId: $py) { launchState launchReadiness { readinessPercent canLaunch } openEnrollmentSummary { eligible } } }`,
+      variableValues: { e: "e", py: "py" }, contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(center.errors).toBeUndefined();
+    expect((center.data as any).enrollmentCenter.launchState).toBe("launched");
+    expect(calls.map((c) => c.info.fieldName)).toEqual(["enrollmentProgress", "enrollmentCenter"]);
+  });
+
   test("dispatches a mutation field too", async () => {
     const calls: any[] = [];
     const fake: ResolverHandler = async (event) => {

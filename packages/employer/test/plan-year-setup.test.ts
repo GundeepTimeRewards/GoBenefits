@@ -50,9 +50,14 @@ describe("planYearSetupStatus (integration)", () => {
     expect(byKey.plans_configured).toBe("complete"); // 2 complete benefit plans
     expect(byKey.rates_configured).toBe("complete"); // plan_rate rows exist
     expect(byKey.contributions_configured).toBe("complete"); // a contribution_rule exists
+    // D-3 domains now light up from the Enrollment fixtures:
+    expect(byKey.window_configured).toBe("complete"); // OE window exists
+    expect(byKey.invitations_sent).toBe("complete"); // invitations sent
+    expect(byKey.elections_reviewed).toBe("complete"); // submitted elections
+    expect(byKey.waivers_reviewed).toBe("complete"); // a waiver exists
     // Un-wired domains are still honestly not_started (not faked complete):
     expect(byKey.documents_configured).toBe("not_started");
-    expect(byKey.window_configured).toBe("not_started");
+    expect(byKey.communications_configured).toBe("not_started");
 
     // completionPct/blockers are server-computed (required-based; 2 of the required-
     // applicable steps complete). Values are bounded and consistent.

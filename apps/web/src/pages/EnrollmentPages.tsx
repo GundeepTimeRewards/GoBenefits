@@ -402,8 +402,9 @@ function ArchiveSummaryCard({ py, employerId }: { py: PlanYearRow; employerId: s
 
 export function EnrollmentProgressPage() {
   const employerId = useActiveEmployerId();
+  const planYearId = useActivePlanYearId();
   const { data: employer } = useEmployer(employerId);
-  const { data: p } = useEnrollmentProgress(employerId);
+  const { data: p } = useEnrollmentProgress(employerId, planYearId);
   const py = useActivePlanYear();
   if (!employer || !p) return <LoadingCard label="Loading enrollment progress…" />;
   return (
