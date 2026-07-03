@@ -822,7 +822,11 @@ type Mutation {
   sendEnrollmentReminders(employerId: ID!, planYearId: ID!, audience: String): JobHandle
   createEnrollmentWindow(employerId: ID!, planYearId: ID!, input: CreateEnrollmentWindowInput!): EnrollmentWindow
 
-  ## --- FUTURE: Elections review (Phase E) — NOT IMPLEMENTED ---
+  ## --- Elections review (Phase E-1) — IMPLEMENTED ---
+  ## The review queue is an EXCEPTION queue. approveElection blocks while an EOI/
+  ## document request is open; sendBackElection returns the election to the employee
+  ## (in_progress + note, open requests cleared); approveAllReadyElections bulk-
+  ## approves only clean submitted rows (no open request AND computed cost).
   approveElection(employerId: ID!, planYearId: ID!, electionId: ID!): ElectionReviewRow
   sendBackElection(employerId: ID!, planYearId: ID!, electionId: ID!, note: String): ElectionReviewRow
   requestEoi(employerId: ID!, electionId: ID!): ActionResult

@@ -108,6 +108,20 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "createEnrollmentWindow":
       return employerService.createEnrollmentWindow(ctx, a.employerId, a.planYearId, a.input);
 
+    // --- Elections Review (Phase E-1) — read on election.read; mutations on election.manage ---
+    case "electionReview":
+      return employerService.electionReview(ctx, a.employerId, a.planYearId);
+    case "approveElection":
+      return employerService.approveElection(ctx, a.employerId, a.planYearId, a.electionId);
+    case "sendBackElection":
+      return employerService.sendBackElection(ctx, a.employerId, a.planYearId, a.electionId, a.note);
+    case "requestEoi":
+      return employerService.requestEoi(ctx, a.employerId, a.electionId);
+    case "requestDependentDocs":
+      return employerService.requestDependentDocs(ctx, a.employerId, a.electionId);
+    case "approveAllReadyElections":
+      return employerService.approveAllReadyElections(ctx, a.employerId, a.planYearId);
+
     // --- Census (Module 1) ---
     case "employees":
       return {
