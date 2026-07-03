@@ -70,12 +70,15 @@ describe("census writes", () => {
     expect(created.firstName).toBe("Test");
     expect(created.employeeNumber).toBe(num);
 
-    const listA = await censusService.listEmployees(ctxA, EMP_A, {});
+    // Search by the unique number: the unfiltered list is LIMIT-windowed, and test
+    // rows accumulate across local runs — presence must not depend on name ordering
+    // keeping the new row inside the first page.
+    const listA = await censusService.listEmployees(ctxA, EMP_A, { search: num });
     expect(listA.some((r) => r.employeeNumber === num)).toBe(true);
 
-    // Must NOT appear in employer B.
+    // Must NOT appear in employer B (same targeted search on B's DB).
     const ctxB = await buildAuthContext("sub-emp-admin-b");
-    const listB = await censusService.listEmployees(ctxB, EMP_B, {});
+    const listB = await censusService.listEmployees(ctxB, EMP_B, { search: num });
     expect(listB.some((r) => r.employeeNumber === num)).toBe(false);
   });
 

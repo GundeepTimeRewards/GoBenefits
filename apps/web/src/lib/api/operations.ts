@@ -76,6 +76,22 @@ export type PlanDetailArgs = { employerId: string; planYearId: string; planId: s
 export type CreatePlanYearArgs = { employerId: string; year: number; label: string };
 export type CopyFromPriorYearArgs = { employerId: string; fromPlanYearId: string; toYear: number };
 export type PlanYearLifecycleArgs = { employerId: string; planYearId: string };
+export type AddPlanArgs = { employerId: string; planYearId: string; line: string; planName: string; carrierName?: string };
+export type DuplicatePlanArgs = { employerId: string; planId: string };
+export type RateBandInput = { age?: number | null; rateEe: number; rateEeSpouse?: number | null; rateEeChild?: number | null; rateFamily?: number | null };
+export type ImportRatesArgs = { employerId: string; planId: string; input: { effectiveDate: string; rows: RateBandInput[] } };
+export type ContributionRuleInput = {
+  name?: string;
+  displayName?: string;
+  pctEmployeeHealth?: number;
+  pctEmployeeDental?: number;
+  pctEmployeeVision?: number;
+  pctDependentHealth?: number;
+  pctDependentDental?: number;
+  pctDependentVision?: number;
+  fixedBasicLife?: number;
+};
+export type UpdateContributionRuleArgs = { employerId: string; input: ContributionRuleInput };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -209,6 +225,21 @@ const ARCHIVE_PLAN_YEAR = `mutation ArchivePlanYear($employerId: ID!, $planYearI
   archivePlanYear(employerId: $employerId, planYearId: $planYearId) ${PLAN_YEAR_MUTATION_FIELDS}
 }`;
 
+// Plans & Rates mutations (Phase D-6). All return ActionResult (id = affected plan/rule).
+const ACTION_RESULT_FIELDS = `{ ok message id }`;
+const ADD_PLAN = `mutation AddPlan($employerId: ID!, $planYearId: ID!, $line: CoverageLine!, $planName: String!, $carrierName: String) {
+  addPlan(employerId: $employerId, planYearId: $planYearId, line: $line, planName: $planName, carrierName: $carrierName) ${ACTION_RESULT_FIELDS}
+}`;
+const DUPLICATE_PLAN = `mutation DuplicatePlan($employerId: ID!, $planId: ID!) {
+  duplicatePlan(employerId: $employerId, planId: $planId) ${ACTION_RESULT_FIELDS}
+}`;
+const IMPORT_RATES = `mutation ImportRates($employerId: ID!, $planId: ID!, $input: ImportRatesInput!) {
+  importRates(employerId: $employerId, planId: $planId, input: $input) ${ACTION_RESULT_FIELDS}
+}`;
+const UPDATE_CONTRIBUTION_RULE = `mutation UpdateContributionRule($employerId: ID!, $input: ContributionRuleInput!) {
+  updateContributionRule(employerId: $employerId, input: $input) ${ACTION_RESULT_FIELDS}
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -237,6 +268,10 @@ export const operations = {
   copyFromPriorYear: { name: "copyFromPriorYear", kind: "mutation", document: COPY_FROM_PRIOR_YEAR, buildVariables: (a: CopyFromPriorYearArgs) => ({ employerId: a.employerId, fromPlanYearId: a.fromPlanYearId, toYear: a.toYear }) } as C1Operation<CopyFromPriorYearArgs, unknown>,
   activatePlanYear: { name: "activatePlanYear", kind: "mutation", document: ACTIVATE_PLAN_YEAR, buildVariables: (a: PlanYearLifecycleArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearLifecycleArgs, unknown>,
   archivePlanYear: { name: "archivePlanYear", kind: "mutation", document: ARCHIVE_PLAN_YEAR, buildVariables: (a: PlanYearLifecycleArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearLifecycleArgs, unknown>,
+  addPlan: { name: "addPlan", kind: "mutation", document: ADD_PLAN, buildVariables: (a: AddPlanArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, line: a.line, planName: a.planName, carrierName: a.carrierName }) } as C1Operation<AddPlanArgs, unknown>,
+  duplicatePlan: { name: "duplicatePlan", kind: "mutation", document: DUPLICATE_PLAN, buildVariables: (a: DuplicatePlanArgs) => ({ employerId: a.employerId, planId: a.planId }) } as C1Operation<DuplicatePlanArgs, unknown>,
+  importRates: { name: "importRates", kind: "mutation", document: IMPORT_RATES, buildVariables: (a: ImportRatesArgs) => ({ employerId: a.employerId, planId: a.planId, input: a.input }) } as C1Operation<ImportRatesArgs, unknown>,
+  updateContributionRule: { name: "updateContributionRule", kind: "mutation", document: UPDATE_CONTRIBUTION_RULE, buildVariables: (a: UpdateContributionRuleArgs) => ({ employerId: a.employerId, input: compact(a.input) }) } as C1Operation<UpdateContributionRuleArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

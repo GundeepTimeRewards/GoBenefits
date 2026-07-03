@@ -52,6 +52,10 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "copyFromPriorYear",
   "activatePlanYear",
   "archivePlanYear",
+  "addPlan", // Phase D-6 (Plans & Rates)
+  "duplicatePlan",
+  "importRates",
+  "updateContributionRule",
 ]);
 
 export type DataSourceResolution = "mock" | "live" | "fallback";

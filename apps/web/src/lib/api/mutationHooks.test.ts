@@ -66,3 +66,22 @@ describe("plan-year lifecycle mutation variable mapping (Phase D-5)", () => {
       .toEqual({ employerId: "e1", planYearId: "py26" });
   });
 });
+
+describe("Plans & Rates mutation variable mapping (Phase D-6)", () => {
+  test("addPlan drops omitted carrierName", () => {
+    const vars = operations.addPlan.buildVariables({ employerId: "e1", planYearId: "py", line: "vision", planName: "VSP Choice" });
+    expect(vars).toEqual({ employerId: "e1", planYearId: "py", line: "vision", planName: "VSP Choice" });
+    expect("carrierName" in vars).toBe(false);
+  });
+  test("duplicatePlan passes employerId + planId", () => {
+    expect(operations.duplicatePlan.buildVariables({ employerId: "e1", planId: "p1" })).toEqual({ employerId: "e1", planId: "p1" });
+  });
+  test("importRates passes input verbatim", () => {
+    const input = { effectiveDate: "2026-07-01", rows: [{ age: null, rateEe: 100, rateEeSpouse: null, rateEeChild: null, rateFamily: 250 }] };
+    expect(operations.importRates.buildVariables({ employerId: "e1", planId: "p1", input })).toEqual({ employerId: "e1", planId: "p1", input });
+  });
+  test("updateContributionRule compacts the patch", () => {
+    const vars = operations.updateContributionRule.buildVariables({ employerId: "e1", input: { pctEmployeeHealth: 75, pctEmployeeDental: undefined } });
+    expect(vars).toEqual({ employerId: "e1", input: { pctEmployeeHealth: 75 } });
+  });
+});
