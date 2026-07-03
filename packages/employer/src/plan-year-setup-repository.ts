@@ -70,9 +70,31 @@ export async function planYearSetupState(db: Pool, planYearId: string): Promise<
   const py = (pyRows as any[])[0];
   const [empRows] = await db.query(`SELECT COUNT(*) AS n FROM employee`);
   const employeeCount = Number((empRows as any[])[0].n);
+
+  // D-2 counts: plans/options/rates scoped to THIS plan year; contribution rules are
+  // employer-level (contribution_rule has no plan_year_id).
+  const [planRows] = await db.query(
+    `SELECT
+        COUNT(*) AS planCount,
+        SUM(setup_status = 'complete') AS completePlanCount,
+        (SELECT COUNT(*) FROM plan_option po JOIN benefit_plan bp2 ON bp2.id = po.benefit_plan_id
+           WHERE bp2.plan_year_id = UUID_TO_BIN(:planYearId)) AS optionCount,
+        (SELECT COUNT(*) FROM plan_rate pr JOIN benefit_plan bp3 ON bp3.id = pr.benefit_plan_id
+           WHERE bp3.plan_year_id = UUID_TO_BIN(:planYearId)) AS rateCount
+     FROM benefit_plan bp WHERE bp.plan_year_id = UUID_TO_BIN(:planYearId)`,
+    { planYearId }
+  );
+  const p = (planRows as any[])[0] ?? {};
+  const [ruleRows] = await db.query(`SELECT COUNT(*) AS n FROM contribution_rule`);
+
   return {
     planYearExists: Boolean(py),
     planYearStatus: py?.status ?? null,
     employeeCount,
+    planCount: Number(p.planCount ?? 0),
+    completePlanCount: Number(p.completePlanCount ?? 0),
+    rateCount: Number(p.rateCount ?? 0),
+    contributionRuleCount: Number((ruleRows as any[])[0].n),
+    optionCount: Number(p.optionCount ?? 0),
   };
 }

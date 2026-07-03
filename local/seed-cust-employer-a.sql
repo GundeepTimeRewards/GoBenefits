@@ -37,3 +37,58 @@ INSERT INTO dependent (id, employee_id, first_name, last_name, relationship, dat
   (UUID_TO_BIN('a3330000-0000-0000-0000-000000000001'),
    UUID_TO_BIN('a1110000-0000-0000-0000-000000000001'), 'Ade', 'Anderson', 'child', '2016-04-02')
 ON DUPLICATE KEY UPDATE last_name = VALUES(last_name);
+
+-- ===========================================================================
+-- Phase D-2 Plans & Rates fixtures (Employer A, active PY 2026 only). Minimal by
+-- design: one medical + one dental plan (both fully set up), one contribution rule,
+-- one eligibility class, plan options, and rates — enough to demo planCatalog /
+-- benefitPlanDetail live and to light up the plans/rates/contributions checklist
+-- steps. Idempotent (fixed UUIDs / unique natural keys). Employer B stays empty.
+-- ===========================================================================
+
+-- Eligibility class (uq_elig_class_name is unique).
+INSERT INTO eligibility_class (id, name, class_code, min_hours_weekly, waiting_period_days) VALUES
+  (UUID_TO_BIN('c1110000-0000-0000-0000-000000000001'), 'Full-Time', 'FT', 30.00, 30)
+ON DUPLICATE KEY UPDATE class_code = VALUES(class_code), min_hours_weekly = VALUES(min_hours_weekly),
+  waiting_period_days = VALUES(waiting_period_days);
+
+-- Employer contribution rule (uq_contrib_name is unique). Employer pays the larger share.
+INSERT INTO contribution_rule (id, name, display_name,
+    pct_employee_health, pct_employee_dental, pct_employee_vision,
+    pct_dependent_health, pct_dependent_dental, pct_dependent_vision) VALUES
+  (UUID_TO_BIN('c2220000-0000-0000-0000-000000000001'), 'standard', 'Standard (percentage of premium)',
+    20.00, 25.00, 30.00, 50.00, 50.00, 50.00)
+ON DUPLICATE KEY UPDATE display_name = VALUES(display_name),
+  pct_employee_health = VALUES(pct_employee_health), pct_employee_dental = VALUES(pct_employee_dental),
+  pct_employee_vision = VALUES(pct_employee_vision);
+
+-- Benefit plans for PY 2026 (a2220000-...-0002). Both complete + active.
+INSERT INTO benefit_plan (id, plan_year_id, benefit_type_key, carrier_name, plan_name, plan_code,
+    subtype, network, hsa_eligible, setup_status, setup_issue_count,
+    deductible_single, deductible_family, oop_single, oop_family, pcp_copay, specialist_copay, status) VALUES
+  (UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'), UUID_TO_BIN('a2220000-0000-0000-0000-000000000002'),
+   'medical', 'UnitedHealthcare', 'UHC Choice Plus PPO', 'UHC-PPO', 'PPO', 'National PPO', 0,
+   'complete', 0, 1500.00, 3000.00, 4000.00, 8000.00, '$25 copay', '$50 copay', 'active'),
+  (UUID_TO_BIN('c3330000-0000-0000-0000-000000000002'), UUID_TO_BIN('a2220000-0000-0000-0000-000000000002'),
+   'dental', 'Guardian', 'Guardian Dental PPO', 'GRD-DEN', 'PPO', 'DentalGuard Preferred', NULL,
+   'complete', 0, 50.00, 150.00, NULL, NULL, NULL, NULL, 'active')
+ON DUPLICATE KEY UPDATE plan_name = VALUES(plan_name), setup_status = VALUES(setup_status),
+  status = VALUES(status), deductible_single = VALUES(deductible_single);
+
+-- Plan options (tie each plan to the Full-Time class → eligibleClasses).
+INSERT INTO plan_option (id, benefit_plan_id, name, eligibility_class_id) VALUES
+  (UUID_TO_BIN('c4440000-0000-0000-0000-000000000001'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'),
+   'Standard', UUID_TO_BIN('c1110000-0000-0000-0000-000000000001')),
+  (UUID_TO_BIN('c4440000-0000-0000-0000-000000000002'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000002'),
+   'Standard', UUID_TO_BIN('c1110000-0000-0000-0000-000000000001'))
+ON DUPLICATE KEY UPDATE name = VALUES(name), eligibility_class_id = VALUES(eligibility_class_id);
+
+-- Rates (non-age-banded; all four tiers for medical, EE/family for dental).
+INSERT INTO plan_rate (id, benefit_plan_id, plan_option_id, age,
+    rate_ee, rate_ee_spouse, rate_ee_child, rate_family, effective_date) VALUES
+  (UUID_TO_BIN('c5550000-0000-0000-0000-000000000001'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'),
+   UUID_TO_BIN('c4440000-0000-0000-0000-000000000001'), NULL, 612.00, 1285.00, 1150.00, 1835.00, '2026-01-01'),
+  (UUID_TO_BIN('c5550000-0000-0000-0000-000000000002'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000002'),
+   UUID_TO_BIN('c4440000-0000-0000-0000-000000000002'), NULL, 38.00, 72.00, 68.00, 110.00, '2026-01-01')
+ON DUPLICATE KEY UPDATE rate_ee = VALUES(rate_ee), rate_family = VALUES(rate_family),
+  effective_date = VALUES(effective_date);

@@ -191,7 +191,8 @@ export function PlansRatesPage() {
 
 // Expandable row detail — read-only summary of rates, contribution, docs, eligibility.
 function PlanRowDetail({ employerId, row }: { employerId: string; row: PlanCatalogRow }) {
-  const { data: d } = useBenefitPlanDetail(employerId, row.id);
+  const planYearId = useActivePlanYearId();
+  const { data: d } = useBenefitPlanDetail(employerId, row.id, planYearId);
   if (!d) return <div className="p-4 text-sm text-muted-foreground">Loading plan detail…</div>;
   return (
     <div className="grid gap-4 p-4 lg:grid-cols-2">
@@ -250,9 +251,10 @@ function PlanRowDetail({ employerId, row }: { employerId: string; row: PlanCatal
 // ── Plan detail — Benefits / Rates / Eligibility / Documents ────────────────
 export function PlanDetailPage() {
   const employerId = useActiveEmployerId();
+  const planYearId = useActivePlanYearId();
   const { planId } = useParams({ strict: false });
   const { data: employer } = useEmployer(employerId);
-  const detail = useBenefitPlanDetail(employerId, planId ?? "");
+  const detail = useBenefitPlanDetail(employerId, planId ?? "", planYearId);
 
   if (detail.isPending || !employer) return <LoadingCard label="Loading plan…" />;
   const p = detail.data;

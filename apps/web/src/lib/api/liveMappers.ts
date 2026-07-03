@@ -2,7 +2,11 @@
 // so hybrid mode is a drop-in for the mock getter. Census/employee/dependent live shapes
 // already match the mock field names (near-identity); employer + plan-year need light
 // remapping. Fields with no C1 source get documented null/0 defaults.
-import type { EmployerProfile, PlanYearRow } from "@/lib/mock/db";
+import type {
+  EmployerProfile, PlanYearRow,
+  PlanCatalog, PlanCatalogRow, BenefitPlanDetail,
+  PlanBenefitRow, PlanRateRow, PlanContribRow, PlanEligRow, PlanDocRow,
+} from "@/lib/mock/db";
 import type { CensusEmployee, EmployerCensusContext, EmployeeDetail, Dependent } from "@/lib/census-mock";
 import type { ChecklistStep, ReadinessStatus, PlanYearSetupView } from "@/lib/plan-year-checklist-mock";
 
@@ -106,6 +110,63 @@ function mapChecklistStep(s: LiveChecklistStep): ChecklistStep {
 
 export function mapPlanYearSetupStatus(v: LivePlanYearSetupStatus): PlanYearSetupView {
   return { completionPct: v.completionPct, blockers: v.blockers, steps: v.steps.map(mapChecklistStep) };
+}
+
+// --- Plans & Rates (Phase D-2) ----------------------------------------------
+// The backend returns canonical SDL casing (lowercase enums + status keys); the mock
+// components render display strings ("Medical", "Complete", "Configured", "Ready"). These
+// mappers do the display-casing so hybrid mode is a drop-in for the mock getters.
+
+const LINE_DISPLAY: Record<string, string> = {
+  medical: "Medical", dental: "Dental", vision: "Vision", rx: "Voluntary",
+  basic_life: "Life & Disability", vol_life: "Life & Disability", std: "Life & Disability", ltd: "Life & Disability",
+  accident: "Voluntary", critical_illness: "Voluntary", hospital: "Voluntary",
+};
+const CONFIG_DISPLAY: Record<string, "Complete" | "Partial" | "Missing"> = { complete: "Complete", partial: "Partial", missing: "Missing" };
+const STATUS_DISPLAY: Record<string, string> = {
+  ready: "Ready", missing_rates: "Missing Rates", missing_contributions: "Missing Contributions",
+  draft: "Draft", in_setup: "In Setup",
+};
+const displayLine = (l: string): string => LINE_DISPLAY[l] ?? "Voluntary / Supplemental";
+
+export type LiveCatalogRow = {
+  planId: string; name: string; carrier: string; line: string; benefitType: string; subtype: string | null;
+  status: string; effective: string | null; enrolled: number | null; coverageTiers: number | null;
+  rateStatus: string; contributionStatus: string; contributionRule: string | null; documentStatus: string;
+  eligibleClasses: string | null; launchBlocker: boolean; warnings: string[];
+};
+export type LivePlanCatalog = {
+  employerId: string; planYearId: string; readOnly: boolean;
+  summary: { total: number; ready: number; missingRates: number; missingContributions: number; missingDocuments: number; launchBlockers: number };
+  plans: LiveCatalogRow[];
+};
+export type LiveBenefitPlanDetail = {
+  planId: string; name: string; carrier: string; line: string; subtype: string | null; network: string | null;
+  fundingType: string | null; effective: string | null; renewalDate: string | null; enrolled: number | null; status: string | null;
+  benefits: PlanBenefitRow[]; rates: PlanRateRow[]; contributions: PlanContribRow[]; eligibility: PlanEligRow[]; documents: PlanDocRow[];
+};
+
+export function mapPlanCatalog(v: LivePlanCatalog): PlanCatalog {
+  const rows: PlanCatalogRow[] = v.plans.map((p) => ({
+    id: p.planId, name: p.name, carrier: p.carrier, line: displayLine(p.line), benefitType: p.benefitType,
+    subtype: p.subtype ?? "", status: STATUS_DISPLAY[p.status] ?? p.status, effective: p.effective ?? "",
+    enrolled: p.enrolled ?? 0, coverageTiers: p.coverageTiers ?? 0,
+    rateStatus: CONFIG_DISPLAY[p.rateStatus] ?? "Missing",
+    contributionStatus: p.contributionStatus === "configured" ? "Configured" : "Missing",
+    contributionRule: p.contributionRule ?? "Not configured",
+    documentStatus: CONFIG_DISPLAY[p.documentStatus] ?? "Missing",
+    eligibleClasses: p.eligibleClasses ?? "", launchBlocker: p.launchBlocker, warnings: p.warnings,
+  }));
+  return { readOnly: v.readOnly, summary: v.summary, rows };
+}
+
+export function mapBenefitPlanDetail(v: LiveBenefitPlanDetail): BenefitPlanDetail {
+  return {
+    id: v.planId, line: displayLine(v.line), name: v.name, carrier: v.carrier, subtype: v.subtype ?? "",
+    enrolled: v.enrolled ?? 0, status: v.status ?? "", effective: v.effective ?? "", setupIssues: [],
+    type: displayLine(v.line), network: v.network ?? "", fundingType: v.fundingType ?? "", renewalDate: v.renewalDate ?? "",
+    benefits: v.benefits, rates: v.rates, contributions: v.contributions, eligibility: v.eligibility, documents: v.documents,
+  };
 }
 
 // Census / employee / dependent live shapes match the mock field names — cast through

@@ -5,10 +5,18 @@
  * user, unauthorized/unknown/archived employer, or a missing permission fails closed
  * inside getCustomerDb — never in the repository.
  */
-import { getCustomerDb, controlPlanePool, type AuthContext } from "@goben/data-access";
+import { getCustomerDb, controlPlanePool, AuthError, type AuthContext } from "@goben/data-access";
 import * as repo from "./plan-year-repository.js";
 import * as setupRepo from "./plan-year-setup-repository.js";
+import * as catalogRepo from "./plan-catalog-repository.js";
 import { deriveChecklist, type PlanYearSetupStatus } from "./plan-year-checklist.js";
+import {
+  buildPlanCatalog,
+  buildPlanDetail,
+  coverageLineOf,
+  type PlanCatalog,
+  type BenefitPlanDetail,
+} from "./plan-catalog.js";
 import type { Employer, PlanYear } from "./types.js";
 
 /** All plan years for an employer (top-bar plan-year selector + Plan Years overview). */
@@ -43,6 +51,56 @@ export async function planYearSetupStatus(
 export async function currentPlanYear(ctx: AuthContext, employerId: string): Promise<PlanYear | null> {
   const { db } = await getCustomerDb(ctx, "plan_year.read", employerId);
   return repo.currentPlanYear(db);
+}
+
+/**
+ * Plans & Rates catalog (Phase D-2) — server-computed aggregate read model over
+ * benefit_plan / plan_rate / contribution_rule. Authorizes on `benefit_plan.read`
+ * (broker gained this in 0004; employer_admin already had it), fail-closed inside
+ * getCustomerDb. benefit_type is control-plane reference data. No mutation, no new
+ * permission beyond the approved broker read co-grant.
+ */
+export async function planCatalog(ctx: AuthContext, employerId: string, planYearId: string): Promise<PlanCatalog> {
+  const { db } = await getCustomerDb(ctx, "benefit_plan.read", employerId);
+  const cp = await controlPlanePool();
+  const [plans, benefitTypes, rule, planYearStatus] = await Promise.all([
+    catalogRepo.listCatalogPlans(db, planYearId),
+    catalogRepo.listBenefitTypes(cp),
+    catalogRepo.getContributionRule(db),
+    planYearStatusOf(db, planYearId),
+  ]);
+  return buildPlanCatalog(employerId, planYearId, planYearStatus, plans, benefitTypes, rule);
+}
+
+/**
+ * Plan detail (Phase D-2) — one plan's benefits/rates/contributions/eligibility.
+ * Same authorization + routing as the catalog. Throws Unauthorized-shaped NotFound if
+ * the plan isn't in this employer's plan year, or has a benefit type with no
+ * CoverageLine (out of D-2 scope).
+ */
+export async function benefitPlanDetail(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  planId: string
+): Promise<BenefitPlanDetail> {
+  const { db } = await getCustomerDb(ctx, "benefit_plan.read", employerId);
+  const plan = await catalogRepo.getCatalogPlan(db, planYearId, planId);
+  if (!plan) throw new AuthError("Plan not found for this employer / plan year");
+  const line = coverageLineOf(plan.benefitTypeKey);
+  if (line == null) throw new AuthError("Plan type is not supported by Plans & Rates");
+  const [rates, rule, classes] = await Promise.all([
+    catalogRepo.listPlanRates(db, planId),
+    catalogRepo.getContributionRule(db),
+    catalogRepo.listEligibilityClasses(db),
+  ]);
+  return buildPlanDetail(plan, line, rates, rule, classes);
+}
+
+/** Plan-year status for the routed customer DB (small helper; null if not found). */
+async function planYearStatusOf(db: import("mysql2/promise").Pool, planYearId: string): Promise<string | null> {
+  const [rows] = await db.query(`SELECT status FROM plan_year WHERE id = UUID_TO_BIN(:planYearId) LIMIT 1`, { planYearId });
+  return (rows as any[])[0]?.status ?? null;
 }
 
 /**

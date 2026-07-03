@@ -46,11 +46,18 @@ export type StepOverride = {
   notes: string | null;
 };
 
-/** Current domain state used by v1 derivation. Extended slice-by-slice. */
+/** Current domain state used by derivation. Extended slice-by-slice. */
 export type DomainState = {
   planYearExists: boolean;
   planYearStatus: string | null; // setup | active | archived
   employeeCount: number;
+  // D-2 (Plans & Rates) — plan-year-scoped counts, except contribution rules which are
+  // employer-level (the contribution_rule table has no plan_year_id).
+  planCount: number; // benefit_plan rows for the PY (any status)
+  completePlanCount: number; // benefit_plan rows with setup_status='complete'
+  rateCount: number; // plan_rate rows across the PY's plans
+  contributionRuleCount: number; // contribution_rule rows (employer-level)
+  optionCount: number; // plan_option rows across the PY's plans
 };
 
 /** GraphQL `ChecklistStep` (field names match the SDL — note `key`, not `stepKey`). */
@@ -75,10 +82,13 @@ export type PlanYearSetupStatus = {
 };
 
 /**
- * V1 base status for a step, from domain state alone (before overrides).
+ * Base status for a step, from domain state alone (before overrides).
  *   - `census_imported`  → complete once any employee exists, else not_started.
  *   - `readiness_review` → complete once the plan year is `active` (you don't reach
  *     active without passing go-live), else not_started.
+ *   - D-2 Plans & Rates: `plans_configured` (complete when a plan is fully set up,
+ *     in_progress while plans exist but none complete), `options_configured`,
+ *     `rates_configured`, `contributions_configured` — presence-based from real rows.
  *   - everything else    → not_started (its domain isn't wired yet; honest, not faked).
  */
 export function deriveStepStatus(def: StepDefinition, domain: DomainState): ChecklistStatus {
@@ -87,6 +97,15 @@ export function deriveStepStatus(def: StepDefinition, domain: DomainState): Chec
       return domain.employeeCount > 0 ? "complete" : "not_started";
     case "readiness_review":
       return domain.planYearStatus === "active" ? "complete" : "not_started";
+    case "plans_configured":
+      if (domain.completePlanCount > 0) return "complete";
+      return domain.planCount > 0 ? "in_progress" : "not_started";
+    case "options_configured":
+      return domain.optionCount > 0 ? "complete" : "not_started";
+    case "rates_configured":
+      return domain.rateCount > 0 ? "complete" : "not_started";
+    case "contributions_configured":
+      return domain.contributionRuleCount > 0 ? "complete" : "not_started";
     default:
       return "not_started";
   }

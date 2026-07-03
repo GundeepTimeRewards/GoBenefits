@@ -23,10 +23,12 @@ function def(stepKey: string, over: Partial<StepDefinition> = {}): StepDefinitio
     ...over,
   };
 }
-const EMPTY: DomainState = { planYearExists: true, planYearStatus: "setup", employeeCount: 0 };
-const POPULATED: DomainState = { planYearExists: true, planYearStatus: "active", employeeCount: 5 };
+const D2_EMPTY = { planCount: 0, completePlanCount: 0, rateCount: 0, contributionRuleCount: 0, optionCount: 0 };
+const D2_FULL = { planCount: 2, completePlanCount: 2, rateCount: 2, contributionRuleCount: 1, optionCount: 2 };
+const EMPTY: DomainState = { planYearExists: true, planYearStatus: "setup", employeeCount: 0, ...D2_EMPTY };
+const POPULATED: DomainState = { planYearExists: true, planYearStatus: "active", employeeCount: 5, ...D2_EMPTY };
 
-describe("deriveStepStatus (v1 rules)", () => {
+describe("deriveStepStatus (v1 + D-2 rules)", () => {
   test("census_imported reflects employee count", () => {
     expect(deriveStepStatus(def("census_imported"), { ...EMPTY, employeeCount: 0 })).toBe("not_started");
     expect(deriveStepStatus(def("census_imported"), { ...EMPTY, employeeCount: 3 })).toBe("complete");
@@ -35,9 +37,22 @@ describe("deriveStepStatus (v1 rules)", () => {
     expect(deriveStepStatus(def("readiness_review"), { ...EMPTY, planYearStatus: "setup" })).toBe("not_started");
     expect(deriveStepStatus(def("readiness_review"), { ...EMPTY, planYearStatus: "active" })).toBe("complete");
   });
-  test("domains not yet wired return not_started (never faked)", () => {
-    for (const k of ["plans_configured", "rates_configured", "contributions_configured", "documents_configured", "window_configured"]) {
-      expect(deriveStepStatus(def(k), POPULATED)).toBe("not_started");
+  test("D-2: plans_configured — complete when a plan is set up, in_progress while drafting", () => {
+    expect(deriveStepStatus(def("plans_configured"), EMPTY)).toBe("not_started");
+    expect(deriveStepStatus(def("plans_configured"), { ...EMPTY, planCount: 2, completePlanCount: 0 })).toBe("in_progress");
+    expect(deriveStepStatus(def("plans_configured"), { ...EMPTY, planCount: 2, completePlanCount: 1 })).toBe("complete");
+  });
+  test("D-2: rates/contributions/options light up from real counts", () => {
+    expect(deriveStepStatus(def("rates_configured"), { ...EMPTY, rateCount: 1 })).toBe("complete");
+    expect(deriveStepStatus(def("rates_configured"), EMPTY)).toBe("not_started");
+    expect(deriveStepStatus(def("contributions_configured"), { ...EMPTY, contributionRuleCount: 1 })).toBe("complete");
+    expect(deriveStepStatus(def("contributions_configured"), EMPTY)).toBe("not_started");
+    expect(deriveStepStatus(def("options_configured"), { ...EMPTY, optionCount: 3 })).toBe("complete");
+    expect(deriveStepStatus(def("options_configured"), EMPTY)).toBe("not_started");
+  });
+  test("still-unwired domains return not_started (never faked)", () => {
+    for (const k of ["documents_configured", "window_configured", "invitations_sent", "payroll_reviewed"]) {
+      expect(deriveStepStatus(def(k), { ...POPULATED, ...D2_FULL })).toBe("not_started");
     }
   });
 });
