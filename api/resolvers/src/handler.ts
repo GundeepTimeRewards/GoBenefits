@@ -135,6 +135,22 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "approveAllReadyElections":
       return employerService.approveAllReadyElections(ctx, a.employerId, a.planYearId);
 
+    // --- Life events (Phase E-4) — HR queue + employee own-records self-service ---
+    case "lifeEventQueue":
+      return employerService.lifeEventQueue(ctx, a.employerId, a.planYearId);
+    case "approveLifeEvent":
+      return employerService.approveLifeEvent(ctx, a.employerId, a.caseId);
+    case "denyLifeEvent":
+      return employerService.denyLifeEvent(ctx, a.employerId, a.caseId, a.reason);
+    case "requestLifeEventDocs":
+      return employerService.requestLifeEventDocs(ctx, a.employerId, a.caseId);
+    case "openElectionWindow":
+      return employerService.openElectionWindow(ctx, a.employerId, a.caseId);
+    case "employeeLifeEvents":
+      return employerService.employeeLifeEvents(ctx);
+    case "reportLifeEvent":
+      return employerService.reportLifeEvent(ctx, a.input);
+
     // --- Census (Module 1) ---
     case "employees":
       return {

@@ -833,10 +833,14 @@ type Mutation {
   requestDependentDocs(employerId: ID!, electionId: ID!): ActionResult
   approveAllReadyElections(employerId: ID!, planYearId: ID!): ActionResult
 
-  ## --- FUTURE: Life events — employee self (Phase E) — NOT IMPLEMENTED ---
+  ## --- Life events — employee self (Phase E-4) — IMPLEMENTED ---
+  ## Identity-scoped: employee role only; the caller's employee row resolves via the
+  ## account-email link (user_account.email = employee_contact.email), fail-closed.
   reportLifeEvent(input: ReportLifeEventInput!): EmployeeLifeEvent
 
   ## --- FUTURE: Life events — HR queue (Phase E) — NOT IMPLEMENTED ---
+  ## (Phase E-4 — IMPLEMENTED) HR decisions record an approval trail; openElectionWindow
+  ## creates a life_event enrollment event + 30-day window on the ACTIVE plan year.
   approveLifeEvent(employerId: ID!, caseId: ID!): LifeEventCase
   denyLifeEvent(employerId: ID!, caseId: ID!, reason: String): LifeEventCase
   requestLifeEventDocs(employerId: ID!, caseId: ID!): ActionResult

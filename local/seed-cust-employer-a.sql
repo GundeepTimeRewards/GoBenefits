@@ -30,7 +30,12 @@ ON DUPLICATE KEY UPDATE status = VALUES(status), hire_date = VALUES(hire_date);
 
 INSERT INTO employee_contact (employee_id, email, cell_phone) VALUES
   (UUID_TO_BIN('a1110000-0000-0000-0000-000000000001'), 'alice@employer-a.test', '555-0101'),
-  (UUID_TO_BIN('a1110000-0000-0000-0000-000000000003'), 'amara@employer-a.test', '555-0103')
+  (UUID_TO_BIN('a1110000-0000-0000-0000-000000000003'), 'amara@employer-a.test', '555-0103'),
+  -- Aaron's contact email matches the seed employee LOGIN (sub-employee-a /
+  -- emp.a@test): the own-records identity link for employee self-service
+  -- (Phase E-4) resolves the caller's employee row by user_account.email =
+  -- employee_contact.email inside their bound employer's DB.
+  (UUID_TO_BIN('a1110000-0000-0000-0000-000000000002'), 'emp.a@test', '555-0102')
 ON DUPLICATE KEY UPDATE email = VALUES(email), cell_phone = VALUES(cell_phone);
 
 INSERT INTO dependent (id, employee_id, first_name, last_name, relationship, date_of_birth) VALUES
