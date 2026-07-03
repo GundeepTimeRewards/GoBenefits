@@ -312,3 +312,54 @@ export const asCensusEmployees = (items: unknown): CensusEmployee[] => (items as
 export const asCensusContext = (v: unknown): EmployerCensusContext => v as EmployerCensusContext;
 export const asEmployeeDetail = (v: unknown): EmployeeDetail | null => (v as unknown as EmployeeDetail) ?? null;
 export const asDependents = (v: unknown): Dependent[] => (v as Dependent[]) ?? [];
+
+// --- Elections Review (Phase E-1) --------------------------------------------
+import type { ElectionReview, ElectionRow, ElectionStatus, ElectionAction, ElectionIssueType } from "@/lib/mock/db";
+
+export type LiveElectionReviewRow = {
+  id: string; employee: string; electionType: string; plans: string; tier: string;
+  dependents: number; issue: string | null; issueType: string; eeCost: number;
+  submitted: string | null; status: string; action: string;
+};
+export type LiveElectionReview = {
+  readOnly: boolean;
+  counts: ElectionReview["counts"];
+  rows: LiveElectionReviewRow[];
+};
+
+/** Live row status (Submitted/Sent Back/Approved + issue) → the FE display status. */
+function mapElectionStatus(r: LiveElectionReviewRow): ElectionStatus {
+  if (r.status === "Approved") return "Approved";
+  if (r.status === "Submitted" && r.issueType === "none") return "Ready to Approve";
+  return "Needs Review"; // Submitted-with-issue and Sent Back both need HR attention
+}
+
+const ACTION_BY_LIVE: Record<string, ElectionAction> = {
+  "Approve": "Approve",
+  "View": "View",
+  "Review EOI": "Request EOI",
+  "Review Documents": "Request Documents",
+  "Recalculate": "Review",
+  "Awaiting Resubmission": "View",
+};
+
+export function mapElectionReview(v: LiveElectionReview): ElectionReview {
+  return {
+    readOnly: v.readOnly,
+    counts: v.counts,
+    rows: v.rows.map((r): ElectionRow => ({
+      id: r.id,
+      employee: r.employee,
+      electionType: r.electionType,
+      plans: r.plans,
+      tier: r.tier,
+      dependents: r.dependents,
+      issue: r.issue ?? "No issues",
+      issueType: (r.issueType as ElectionIssueType) ?? "none",
+      eeCost: r.eeCost,
+      submitted: r.submitted ?? "—",
+      status: mapElectionStatus(r),
+      action: ACTION_BY_LIVE[r.action] ?? "Review",
+    })),
+  };
+}

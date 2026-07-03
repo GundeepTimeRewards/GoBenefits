@@ -102,6 +102,9 @@ export type CreateEnrollmentWindowInput = {
   effectiveDate?: string;
 };
 export type CreateEnrollmentWindowArgs = { employerId: string; planYearId: string; input: CreateEnrollmentWindowInput };
+export type ElectionActionArgs = { employerId: string; planYearId: string; electionId: string };
+export type SendBackElectionArgs = ElectionActionArgs & { note?: string };
+export type ElectionFlagArgs = { employerId: string; electionId: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -262,6 +265,32 @@ const CREATE_ENROLLMENT_WINDOW = `mutation CreateEnrollmentWindow($employerId: I
   createEnrollmentWindow(employerId: $employerId, planYearId: $planYearId, input: $input) { id name type windowLabel status nextAction }
 }`;
 
+// Elections Review (Phase E-1). The read returns the whole exception queue; the
+// row-returning mutations select a minimal row (hooks invalidate the full read).
+const ELECTION_REVIEW_ROW_FIELDS = `{ id employee electionType plans tier dependents issue issueType eeCost submitted status action }`;
+const ELECTION_REVIEW = `query ElectionReview($employerId: ID!, $planYearId: ID!) {
+  electionReview(employerId: $employerId, planYearId: $planYearId) {
+    readOnly
+    counts { needsReview readyToApprove eoi dependent waiver cost approved }
+    rows ${ELECTION_REVIEW_ROW_FIELDS}
+  }
+}`;
+const APPROVE_ELECTION = `mutation ApproveElection($employerId: ID!, $planYearId: ID!, $electionId: ID!) {
+  approveElection(employerId: $employerId, planYearId: $planYearId, electionId: $electionId) ${ELECTION_REVIEW_ROW_FIELDS}
+}`;
+const SEND_BACK_ELECTION = `mutation SendBackElection($employerId: ID!, $planYearId: ID!, $electionId: ID!, $note: String) {
+  sendBackElection(employerId: $employerId, planYearId: $planYearId, electionId: $electionId, note: $note) ${ELECTION_REVIEW_ROW_FIELDS}
+}`;
+const REQUEST_EOI = `mutation RequestEoi($employerId: ID!, $electionId: ID!) {
+  requestEoi(employerId: $employerId, electionId: $electionId) ${ACTION_RESULT_FIELDS}
+}`;
+const REQUEST_DEPENDENT_DOCS = `mutation RequestDependentDocs($employerId: ID!, $electionId: ID!) {
+  requestDependentDocs(employerId: $employerId, electionId: $electionId) ${ACTION_RESULT_FIELDS}
+}`;
+const APPROVE_ALL_READY = `mutation ApproveAllReadyElections($employerId: ID!, $planYearId: ID!) {
+  approveAllReadyElections(employerId: $employerId, planYearId: $planYearId) ${ACTION_RESULT_FIELDS}
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -297,6 +326,12 @@ export const operations = {
   launchEnrollment: { name: "launchEnrollment", kind: "mutation", document: LAUNCH_ENROLLMENT, buildVariables: (a: LaunchEnrollmentArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<LaunchEnrollmentArgs, unknown>,
   sendEnrollmentReminders: { name: "sendEnrollmentReminders", kind: "mutation", document: SEND_ENROLLMENT_REMINDERS, buildVariables: (a: SendRemindersArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, audience: a.audience }) } as C1Operation<SendRemindersArgs, unknown>,
   createEnrollmentWindow: { name: "createEnrollmentWindow", kind: "mutation", document: CREATE_ENROLLMENT_WINDOW, buildVariables: (a: CreateEnrollmentWindowArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, input: compact(a.input) }) } as C1Operation<CreateEnrollmentWindowArgs, unknown>,
+  electionReview: { name: "electionReview", kind: "query", document: ELECTION_REVIEW, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  approveElection: { name: "approveElection", kind: "mutation", document: APPROVE_ELECTION, buildVariables: (a: ElectionActionArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, electionId: a.electionId }) } as C1Operation<ElectionActionArgs, unknown>,
+  sendBackElection: { name: "sendBackElection", kind: "mutation", document: SEND_BACK_ELECTION, buildVariables: (a: SendBackElectionArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, electionId: a.electionId, note: a.note }) } as C1Operation<SendBackElectionArgs, unknown>,
+  requestEoi: { name: "requestEoi", kind: "mutation", document: REQUEST_EOI, buildVariables: (a: ElectionFlagArgs) => ({ employerId: a.employerId, electionId: a.electionId }) } as C1Operation<ElectionFlagArgs, unknown>,
+  requestDependentDocs: { name: "requestDependentDocs", kind: "mutation", document: REQUEST_DEPENDENT_DOCS, buildVariables: (a: ElectionFlagArgs) => ({ employerId: a.employerId, electionId: a.electionId }) } as C1Operation<ElectionFlagArgs, unknown>,
+  approveAllReadyElections: { name: "approveAllReadyElections", kind: "mutation", document: APPROVE_ALL_READY, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

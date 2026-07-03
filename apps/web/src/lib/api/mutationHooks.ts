@@ -308,3 +308,40 @@ export function useCreateEnrollmentWindow(employerId: string) {
     },
   });
 }
+
+// --- Elections Review mutations (Phase E-1) --------------------------------------
+const ELECTION_REVIEW_READS = ["electionReview", "employerOverview", "planYearSetup", "enrollmentCenter", "enrollmentProgress"];
+
+function useElectionMutation<TArgs>(
+  employerId: string,
+  op: keyof typeof operations,
+  buildArgs: (args: TArgs) => Record<string, unknown>
+) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, TArgs>({
+    mutationFn: async (args) => {
+      if (resolveDataSource(op as string, employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations[op] as never, { ...buildArgs(args), employerId } as never));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(ELECTION_REVIEW_READS);
+    },
+  });
+}
+
+export function useApproveElection(employerId: string) {
+  return useElectionMutation<{ planYearId: string; electionId: string }>(employerId, "approveElection", (a) => a);
+}
+export function useSendBackElection(employerId: string) {
+  return useElectionMutation<{ planYearId: string; electionId: string; note?: string }>(employerId, "sendBackElection", (a) => a);
+}
+export function useRequestEoi(employerId: string) {
+  return useElectionMutation<{ electionId: string }>(employerId, "requestEoi", (a) => a);
+}
+export function useRequestDependentDocs(employerId: string) {
+  return useElectionMutation<{ electionId: string }>(employerId, "requestDependentDocs", (a) => a);
+}
+export function useApproveAllReadyElections(employerId: string) {
+  return useElectionMutation<{ planYearId: string }>(employerId, "approveAllReadyElections", (a) => a);
+}

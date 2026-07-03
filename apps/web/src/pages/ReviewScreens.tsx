@@ -9,6 +9,14 @@ import { PageHeader, StatusPill, LoadingCard } from "@/components/common";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useEmployer, useElectionReview } from "@/lib/api";
+import {
+  useApproveElection,
+  useSendBackElection,
+  useRequestEoi,
+  useRequestDependentDocs,
+  useApproveAllReadyElections,
+  type FormMutationError,
+} from "@/lib/api/mutationHooks";
 import type { ElectionRow, ElectionStatus } from "@/lib/mock/db";
 import { waivers } from "@/lib/app-mock";
 
@@ -51,6 +59,7 @@ export function ElectionsReviewPage() {
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
   const { data: review } = useElectionReview(employerId, planYearId);
+  const approveAll = useApproveAllReadyElections(employerId);
   const [tab, setTab] = useState<TabKey>("all");
   const [selected, setSelected] = useState<ElectionRow | null>(null);
 
@@ -77,8 +86,12 @@ export function ElectionsReviewPage() {
         actions={review.readOnly ? undefined : (
           <>
             <Button variant="outline" size="sm"><Download className="mr-1.5 h-4 w-4" />Export Review List</Button>
-            <Button size="sm"><CheckCircle2 className="mr-1.5 h-4 w-4" />Approve All Ready</Button>
-            <Button variant="ghost" size="sm">More</Button>
+            <span className="inline-flex items-center gap-2">
+              {approveAll.data?.live && <span className="text-xs text-success">{(approveAll.data.data as { approveAllReadyElections?: { message?: string } })?.approveAllReadyElections?.message}</span>}
+              <Button size="sm" disabled={approveAll.isPending} onClick={() => approveAll.mutate({ planYearId })}>
+                <CheckCircle2 className="mr-1.5 h-4 w-4" />{approveAll.isPending ? "Approving…" : "Approve All Ready"}
+              </Button>
+            </span>
           </>
         )}
       />
@@ -169,13 +182,32 @@ export function ElectionsReviewPage() {
         Election review approves submitted <span className="font-medium">intent</span>. Active <span className="font-medium">coverage</span> is created separately based on approval and effective date.
       </p>
 
-      {selected && <ElectionDetailDrawer row={selected} readOnly={review.readOnly} onClose={() => setSelected(null)} />}
+      {selected && (
+        <ElectionDetailDrawer
+          row={selected}
+          readOnly={review.readOnly}
+          employerId={employerId}
+          planYearId={planYearId}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 }
 
-// Lightweight right-side drawer placeholder (mock — no primitive dependency).
-function ElectionDetailDrawer({ row, readOnly, onClose }: { row: ElectionRow; readOnly: boolean; onClose: () => void }) {
+// Right-side review drawer. Actions call the E-1 mutations (no-op in mock mode);
+// on success the drawer closes and invalidation refreshes the queue.
+function ElectionDetailDrawer({ row, readOnly, employerId, planYearId, onClose }: {
+  row: ElectionRow; readOnly: boolean; employerId: string; planYearId: string; onClose: () => void;
+}) {
+  const [note, setNote] = useState("");
+  const approve = useApproveElection(employerId);
+  const sendBack = useSendBackElection(employerId);
+  const reqEoi = useRequestEoi(employerId);
+  const reqDocs = useRequestDependentDocs(employerId);
+  const pending = approve.isPending || sendBack.isPending || reqEoi.isPending || reqDocs.isPending;
+  const error: FormMutationError | null = approve.error ?? sendBack.error ?? reqEoi.error ?? reqDocs.error;
+  const done = { onSuccess: onClose };
   const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-0.5 text-sm font-medium">{value}</div></div>
   );
@@ -214,19 +246,30 @@ function ElectionDetailDrawer({ row, readOnly, onClose }: { row: ElectionRow; re
             <div className="mt-1 rounded-md border p-3 text-sm"><span className="font-medium tabular-nums">${row.eeCost.toFixed(2)}</span> employee / pay period</div>
           </div>
           <div>
-            <div className="mb-1 text-xs text-muted-foreground">Admin notes</div>
-            <textarea disabled={readOnly} placeholder="Add a note for this review (mock)…" className="h-20 w-full resize-none rounded-md border bg-background p-2 text-sm" />
+            <div className="mb-1 text-xs text-muted-foreground">Admin notes (sent to the employee with Send Back)</div>
+            <textarea
+              disabled={readOnly}
+              placeholder="Add a note for this review…"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="h-20 w-full resize-none rounded-md border bg-background p-2 text-sm"
+            />
           </div>
+          {error && <p className="text-xs text-destructive">{error.type === "unauthorized" ? "Not permitted: " : ""}{error.message}</p>}
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}><X className="mr-1.5 h-3.5 w-3.5" />Close</Button>
           {!readOnly && row.status !== "Approved" && (
             <>
-              {row.issueType === "eoi" && <Button variant="outline" size="sm">Request EOI</Button>}
-              {row.issueType === "dependent" && <Button variant="outline" size="sm">Request Documents</Button>}
-              {row.issueType === "waiver" && <Button variant="outline" size="sm">Review Waiver</Button>}
-              {row.issueType !== "none" && <Button variant="outline" size="sm" className="border-destructive/40 text-destructive">Send Back</Button>}
-              <Button size="sm"><CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Approve</Button>
+              {row.issueType !== "eoi" && <Button variant="outline" size="sm" disabled={pending} onClick={() => reqEoi.mutate({ electionId: row.id }, done)}>Request EOI</Button>}
+              {row.issueType !== "dependent" && <Button variant="outline" size="sm" disabled={pending} onClick={() => reqDocs.mutate({ electionId: row.id }, done)}>Request Documents</Button>}
+              <Button variant="outline" size="sm" className="border-destructive/40 text-destructive" disabled={pending}
+                onClick={() => sendBack.mutate({ planYearId, electionId: row.id, note: note.trim() || undefined }, done)}>
+                {sendBack.isPending ? "Sending…" : "Send Back"}
+              </Button>
+              <Button size="sm" disabled={pending} onClick={() => approve.mutate({ planYearId, electionId: row.id }, done)}>
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />{approve.isPending ? "Approving…" : "Approve"}
+              </Button>
             </>
           )}
         </div>

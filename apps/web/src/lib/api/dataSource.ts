@@ -59,6 +59,12 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "launchEnrollment", // Phase D-7 (enrollment)
   "sendEnrollmentReminders",
   "createEnrollmentWindow",
+  "electionReview", // Phase E-1 (plan-year-scoped read)
+  "approveElection",
+  "sendBackElection",
+  "requestEoi",
+  "requestDependentDocs",
+  "approveAllReadyElections",
 ]);
 
 export type DataSourceResolution = "mock" | "live" | "fallback";
