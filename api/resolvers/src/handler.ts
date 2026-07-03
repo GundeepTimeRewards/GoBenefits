@@ -100,6 +100,13 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return employerService.enrollmentProgress(ctx, a.employerId, a.planYearId);
     case "enrollmentCenter":
       return employerService.enrollmentCenter(ctx, a.employerId, a.planYearId);
+    // Enrollment mutations (Phase D-7) — all on `enrollment.manage`.
+    case "launchEnrollment":
+      return employerService.launchEnrollment(ctx, a.employerId, a.planYearId);
+    case "sendEnrollmentReminders":
+      return employerService.sendEnrollmentReminders(ctx, a.employerId, a.planYearId, a.audience);
+    case "createEnrollmentWindow":
+      return employerService.createEnrollmentWindow(ctx, a.employerId, a.planYearId, a.input);
 
     // --- Census (Module 1) ---
     case "employees":

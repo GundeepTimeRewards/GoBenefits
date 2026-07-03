@@ -20,6 +20,8 @@ import {
   type BenefitPlanDetail,
 } from "./plan-catalog.js";
 import * as planMutRepo from "./plan-mutation-repository.js";
+import * as enrollMutRepo from "./enrollment-mutation-repository.js";
+import { randomUUID } from "node:crypto";
 import {
   buildEnrollmentProgress,
   buildEnrollmentCenter,
@@ -326,6 +328,138 @@ export async function updateContributionRule(
     name: input.name?.trim(),
   });
   return { ok: true, message: "Contribution rule updated", id };
+}
+
+const WINDOW_TYPES = new Set(["open_enrollment", "new_hire", "life_event"]);
+
+/** GraphQL EnrollmentWindow shape returned by createEnrollmentWindow. */
+export type EnrollmentWindowResult = {
+  id: string;
+  name: string;
+  type: string;
+  windowLabel: string | null;
+  effectiveRule: string | null;
+  employeesAffected: string | null;
+  status: string;
+  completion: number | null;
+  nextAction: string | null;
+};
+
+/**
+ * Create an enrollment window (Phase D-7). Authorizes on `enrollment.manage`
+ * (broker + employer_admin both hold it since 0002). Archived plan years are
+ * read-only. For open_enrollment the window attaches to the plan year's existing
+ * OE event; other types get a new event.
+ */
+export async function createEnrollmentWindow(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  input: { type: string; name?: string | null; windowStart: string; windowEnd: string; effectiveDate?: string | null }
+): Promise<EnrollmentWindowResult> {
+  const { db } = await getCustomerDb(ctx, "enrollment.manage", employerId);
+  if (!WINDOW_TYPES.has(input.type)) {
+    throw new ValidationError(`type must be one of: ${[...WINDOW_TYPES].join(", ")}`);
+  }
+  for (const [field, v] of [["windowStart", input.windowStart], ["windowEnd", input.windowEnd]] as const) {
+    if (!ISO_DATE.test(v ?? "")) throw new ValidationError(`${field} must be YYYY-MM-DD`);
+  }
+  if (input.effectiveDate != null && !ISO_DATE.test(input.effectiveDate)) {
+    throw new ValidationError("effectiveDate must be YYYY-MM-DD");
+  }
+  if (input.windowStart > input.windowEnd) throw new ValidationError("windowStart must be on or before windowEnd");
+  const pyStatus = await planMutRepo.planYearStatus(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+
+  const typeLabel =
+    input.type === "open_enrollment" ? "Open Enrollment" : input.type === "new_hire" ? "New Hire" : "Life Event";
+  const name = input.name?.trim() || typeLabel;
+  const { windowId } = await enrollMutRepo.createWindow(db, {
+    planYearId,
+    type: input.type,
+    name,
+    effectiveDate: input.effectiveDate ?? input.windowStart,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const status = input.windowEnd < today ? "Closed" : input.windowStart > today ? "Scheduled" : "Open";
+  return {
+    id: windowId,
+    name,
+    type: typeLabel,
+    windowLabel: `${input.windowStart} – ${input.windowEnd}`,
+    effectiveRule: null,
+    employeesAffected: null,
+    status,
+    completion: null,
+    nextAction: status === "Scheduled" ? "Opens automatically on the start date" : null,
+  };
+}
+
+/**
+ * Launch open enrollment (Phase D-7). Authorizes on `enrollment.manage`. Gates:
+ * the plan year is not archived, the setup checklist has ZERO launch blockers
+ * (server-authoritative — same derivation the readiness UI shows), and an OPEN
+ * open-enrollment window exists (create one via createEnrollmentWindow first).
+ * Launching invites every not-yet-invited employee (idempotent — relaunching only
+ * fills gaps) and returns the refreshed Enrollment Center aggregate. Prod email
+ * delivery (SES via EventBridge) hangs off the invitation rows; local scope stops
+ * at the rows.
+ */
+export async function launchEnrollment(ctx: AuthContext, employerId: string, planYearId: string): Promise<EnrollmentCenter> {
+  const { db } = await getCustomerDb(ctx, "enrollment.manage", employerId);
+  const pyStatus = await planMutRepo.planYearStatus(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+
+  const cp = await controlPlanePool();
+  const [defs, overrides, domain] = await Promise.all([
+    setupRepo.listStepDefinitions(cp),
+    setupRepo.listStepOverrides(db, planYearId),
+    setupRepo.planYearSetupState(db, planYearId),
+  ]);
+  const checklist = deriveChecklist(employerId, planYearId, defs, overrides, domain);
+  if (checklist.blockers > 0) {
+    throw new ValidationError(
+      `Cannot launch: ${checklist.blockers} launch blocker(s) in the setup checklist — resolve them first`
+    );
+  }
+
+  const event = await enrollmentRepo.getOeEvent(db, planYearId);
+  if (!event) throw new ValidationError("Create an open-enrollment window first");
+  if (!(await enrollMutRepo.hasOpenWindow(db, event.eventId))) {
+    throw new ValidationError("The open-enrollment window has closed — create a new window first");
+  }
+
+  await enrollMutRepo.inviteAllEmployees(db, event.eventId);
+  return enrollmentCenter(ctx, employerId, planYearId);
+}
+
+/**
+ * Send enrollment reminders (Phase D-7). Authorizes on `enrollment.manage`.
+ * audience: all (default) | not_started | in_progress; submitted employees are
+ * never reminded. Synchronous locally (bumps invitation reminder counts + marks
+ * sent); the prod path fans out to SES via SQS — hence the JobHandle shape, kept
+ * so the contract doesn't change when delivery goes async.
+ */
+export async function sendEnrollmentReminders(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  audience?: string | null
+): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "enrollment.manage", employerId);
+  const aud = audience ?? "all";
+  if (!["all", "not_started", "in_progress"].includes(aud)) {
+    throw new ValidationError("audience must be all, not_started, or in_progress");
+  }
+  const event = await enrollmentRepo.getOeEvent(db, planYearId);
+  if (!event) throw new ValidationError("No open-enrollment event for this plan year");
+  const count = await enrollMutRepo.sendReminders(db, event.eventId, aud as enrollMutRepo.ReminderAudience);
+  return { jobId: randomUUID(), status: `completed: ${count} reminder(s) sent` };
 }
 
 /** Plan-year status for the routed customer DB (small helper; null if not found). */

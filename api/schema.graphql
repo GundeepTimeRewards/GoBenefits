@@ -809,10 +809,18 @@ type Mutation {
   importRates(employerId: ID!, planId: ID!, input: ImportRatesInput!): ActionResult
   updateContributionRule(employerId: ID!, input: ContributionRuleInput!): ActionResult
 
-  ## --- FUTURE: Enrollment (Phase D) — NOT IMPLEMENTED ---
+  ## --- Enrollment (Phase D-7) — IMPLEMENTED ---
+  ## launchEnrollment: opens OE for the plan year — requires zero launch blockers and an
+  ##   OPEN open-enrollment window (create one first), then invites every not-yet-invited
+  ##   employee and returns the refreshed Enrollment Center aggregate.
+  ## sendEnrollmentReminders: audience = all | not_started | in_progress (default all);
+  ##   synchronous locally (bumps invitation reminder counts) — SQS/SES delivery in prod.
+  ## createEnrollmentWindow: finalized from the (type: String!) stub — a window needs
+  ##   dates. For open_enrollment the window attaches to the plan year's existing OE
+  ##   event (no duplicate events); other types get a new event.
   launchEnrollment(employerId: ID!, planYearId: ID!): EnrollmentCenter
   sendEnrollmentReminders(employerId: ID!, planYearId: ID!, audience: String): JobHandle
-  createEnrollmentWindow(employerId: ID!, planYearId: ID!, type: String!): EnrollmentWindow
+  createEnrollmentWindow(employerId: ID!, planYearId: ID!, input: CreateEnrollmentWindowInput!): EnrollmentWindow
 
   ## --- FUTURE: Elections review (Phase E) — NOT IMPLEMENTED ---
   approveElection(employerId: ID!, planYearId: ID!, electionId: ID!): ElectionReviewRow
@@ -853,6 +861,16 @@ type Mutation {
 }
 
 ## --- Inputs ------------------------------------------------------------------
+## createEnrollmentWindow payload (Phase D-7). type: open_enrollment | new_hire |
+## life_event (customer-DB enum). effectiveDate defaults to windowStart.
+input CreateEnrollmentWindowInput {
+  type: String!
+  name: String
+  windowStart: AWSDate!
+  windowEnd: AWSDate!
+  effectiveDate: AWSDate
+}
+
 ## One rate band for importRates: age = null for composite (non-age-banded) rates.
 ## rateEe is required; missing tiers stay null (not offered).
 input RateBandInput {
