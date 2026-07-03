@@ -26,6 +26,7 @@ import * as deductionRepo from "./deduction-repository.js";
 import * as lifeEventRepo from "./life-event-repository.js";
 import * as docRepo from "./document-repository.js";
 import * as payrollDataRepo from "./payroll-data-repository.js";
+import * as cobraRepo from "./cobra-repository.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -1067,6 +1068,178 @@ export async function runAcaLookback(ctx: AuthContext, employerId: string, planY
     return { jobId: randomUUID(), status: "completed: no imported payroll hours to measure — import payroll data first" };
   }
   return { jobId: randomUUID(), status: `completed: ${res.evaluated} employee(s) measured, ${res.fullTime} full-time` };
+}
+
+/** GraphQL CobraEvent view + the CobraCompliance section F-2 embeds. */
+export type CobraEventView = {
+  id: string;
+  person: string;
+  relationship: string | null;
+  event: string;
+  noticeStatus: string | null;
+  cobraStatus: string | null;
+  paymentStatus: string | null;
+  tpaStatus: string | null;
+  nextStep: string | null;
+};
+
+export type CobraCompliance = {
+  activeParticipants: number;
+  qualifyingEvents: number;
+  overdueNotices: number;
+  paymentIssues: number;
+  events: CobraEventView[];
+  beneficiaries: { person: string; relationship: string | null; event: string; status: string }[];
+  payments: never[];
+};
+
+const COBRA_EVENT_LABEL: Record<string, string> = {
+  termination: "Termination",
+  reduction_in_hours: "Reduction in Hours",
+  divorce: "Divorce",
+  dependent_aging_out: "Dependent Aging Out",
+  death: "Death",
+  other: "Other Qualifying Event",
+};
+
+function cobraNextStep(r: cobraRepo.CobraEventRow): string {
+  switch (r.status) {
+    case "pending_review": return "Review qualifying event";
+    case "notice_due": case "notice_overdue": return `Send election notice by ${r.noticeDeadline ?? "the deadline"}`;
+    case "notice_sent": case "election_window_open": return `Awaiting election (window closes ${r.windowEnd ?? "—"})`;
+    case "elected": return "Hand off to TPA for premium administration";
+    case "waived": case "election_expired": case "complete": return "—";
+    default: return "—";
+  }
+}
+
+function toCobraView(r: cobraRepo.CobraEventRow): CobraEventView {
+  return {
+    id: r.id,
+    person: r.person,
+    relationship: "employee",
+    event: `${COBRA_EVENT_LABEL[r.eventType] ?? r.eventType} · ${r.eventDate}`,
+    noticeStatus: r.noticeStatus ?? (r.status === "notice_due" || r.status === "notice_overdue" ? "due" : null),
+    cobraStatus: r.status,
+    paymentStatus: "TPA-administered",
+    tpaStatus: r.tpa ?? "TPA-administered",
+    nextStep: cobraNextStep(r),
+  };
+}
+
+/**
+ * COBRA compliance section (Phase F-1) — `cobra.read`. Payments are ALWAYS empty:
+ * premium collection is TPA-administered by product decision (2026-07-03), so
+ * paymentIssues is structurally 0 and cobra_payment stays unused.
+ */
+export async function cobraCompliance(ctx: AuthContext, employerId: string): Promise<CobraCompliance> {
+  const { db } = await getCustomerDb(ctx, "cobra.read", employerId);
+  const [events, beneficiaries] = await Promise.all([cobraRepo.listEvents(db), cobraRepo.listBeneficiaries(db)]);
+  const eventById = new Map(events.map((e) => [e.id, e]));
+  return {
+    activeParticipants: events.filter((e) => e.status === "elected").length,
+    qualifyingEvents: events.length,
+    overdueNotices: events.filter((e) => e.status === "notice_overdue" || (e.status === "notice_due" && e.noticeDeadline != null && e.noticeDeadline < new Date().toISOString().slice(0, 10))).length,
+    paymentIssues: 0,
+    events: events.map(toCobraView),
+    beneficiaries: beneficiaries.map((b) => {
+      const ev = eventById.get(b.eventId);
+      return {
+        person: b.person,
+        relationship: b.relationship,
+        event: ev ? `${COBRA_EVENT_LABEL[ev.eventType] ?? ev.eventType} · ${ev.eventDate}` : "—",
+        status: ev?.status ?? "—",
+      };
+    }),
+    payments: [],
+  };
+}
+
+const COBRA_EVENT_TYPES = new Set(["termination", "reduction_in_hours", "divorce", "dependent_aging_out", "death", "other"]);
+
+/**
+ * Record a COBRA qualifying event (Phase F-1). `cobra.manage`. Creates the event
+ * (notice deadline = event date + 44 days: 30 employer→administrator + 14
+ * administrator→QBs) and the qualified beneficiaries (employee + dependents on file).
+ */
+export async function createCobraEvent(
+  ctx: AuthContext,
+  employerId: string,
+  input: { employeeId: string; eventType: string; eventDate: string; coverage?: string | null }
+): Promise<CobraEventView> {
+  const { db } = await getCustomerDb(ctx, "cobra.manage", employerId);
+  if (!COBRA_EVENT_TYPES.has(input.eventType)) {
+    throw new ValidationError(`eventType must be one of: ${[...COBRA_EVENT_TYPES].join(", ")}`);
+  }
+  if (!ISO_DATE.test(input.eventDate ?? "")) throw new ValidationError("eventDate must be YYYY-MM-DD");
+  const [empRows] = await db.query(`SELECT 1 FROM employee WHERE id = UUID_TO_BIN(:id) LIMIT 1`, { id: input.employeeId });
+  if ((empRows as unknown[]).length === 0) throw new ValidationError("Employee not found for this employer");
+  const id = await cobraRepo.insertEvent(db, {
+    employeeId: input.employeeId,
+    eventType: input.eventType,
+    eventDate: input.eventDate,
+    coverage: input.coverage?.trim() || null,
+  });
+  return toCobraView((await cobraRepo.getEvent(db, id))!);
+}
+
+/**
+ * Send the COBRA election notice (Phase F-1). `cobra.manage`. Metadata-first: a
+ * notice document is recorded (prod renders/mails against the reserved key), the
+ * cobra_notice row is stamped sent, and the 60-day election window opens.
+ */
+export async function generateCobraNotice(ctx: AuthContext, employerId: string, cobraEventId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "cobra.manage", employerId);
+  const event = await cobraRepo.getEvent(db, cobraEventId);
+  if (!event) throw new ValidationError("COBRA event not found for this employer");
+  if (!["pending_review", "notice_due", "notice_overdue"].includes(event.status)) {
+    throw new ValidationError("The election notice has already been sent for this event");
+  }
+  const current = await repo.currentPlanYear(db);
+  let documentId: string | null = null;
+  if (current) {
+    documentId = await docRepo.insertDocument(db, {
+      name: `COBRA Election Notice — ${event.person}.pdf`,
+      category: "cobra_notice",
+      uploadedBy: ctx.user.id,
+      planYearId: current.id,
+      employeeId: event.employeeId,
+    });
+  }
+  const { windowEnd } = await cobraRepo.sendElectionNotice(db, cobraEventId, documentId);
+  return { ok: true, message: `Election notice sent — window closes ${windowEnd}`, id: cobraEventId };
+}
+
+/** Record a COBRA election decision (Phase F-1). `cobra.manage`. Window must be open. */
+export async function recordCobraElection(
+  ctx: AuthContext,
+  employerId: string,
+  cobraEventId: string,
+  elected: boolean,
+  coverage?: string | null
+): Promise<CobraEventView> {
+  const { db } = await getCustomerDb(ctx, "cobra.manage", employerId);
+  const event = await cobraRepo.getEvent(db, cobraEventId);
+  if (!event) throw new ValidationError("COBRA event not found for this employer");
+  if (event.status !== "election_window_open" && event.status !== "notice_sent") {
+    throw new ValidationError("Send the election notice before recording a decision");
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (event.windowEnd != null && today > event.windowEnd) {
+    throw new ValidationError(`The 60-day election window closed on ${event.windowEnd}`);
+  }
+  await cobraRepo.recordElection(db, cobraEventId, elected, coverage?.trim() || null);
+  return toCobraView((await cobraRepo.getEvent(db, cobraEventId))!);
+}
+
+/**
+ * Premium collection is OUT OF SCOPE by product decision (2026-07-03): a TPA
+ * administers COBRA payments. The mutation stays in the contract for the TPA-less
+ * future but always fails closed with the reason.
+ */
+export async function recordCobraPayment(ctx: AuthContext, employerId: string): Promise<never> {
+  await getCustomerDb(ctx, "cobra.manage", employerId); // authorization still applies
+  throw new ValidationError("COBRA premium collection is administered by the TPA — payment tracking is not enabled");
 }
 
 /** Age in whole years at a date (nulls → null: composite rates only). */

@@ -146,6 +146,16 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "recalculateLookback":
       return employerService.runAcaLookback(ctx, a.employerId, a.planYearId);
 
+    // --- COBRA (Phase F-1) — cobra.read / cobra.manage; payments are TPA-administered ---
+    case "createCobraEvent":
+      return employerService.createCobraEvent(ctx, a.employerId, a.input);
+    case "generateCobraNotice":
+      return employerService.generateCobraNotice(ctx, a.employerId, a.cobraEventId);
+    case "recordCobraElection":
+      return employerService.recordCobraElection(ctx, a.employerId, a.cobraEventId, a.elected, a.coverage);
+    case "recordCobraPayment":
+      return employerService.recordCobraPayment(ctx, a.employerId);
+
     // --- Documents (Phase E-3, metadata-first) — documents.read / documents.manage ---
     case "documentWorkspace":
       return employerService.documentWorkspace(ctx, a.employerId, a.planYearId);
