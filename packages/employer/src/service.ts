@@ -22,6 +22,8 @@ import {
 import * as planMutRepo from "./plan-mutation-repository.js";
 import * as enrollMutRepo from "./enrollment-mutation-repository.js";
 import * as reviewRepo from "./election-review-repository.js";
+import * as deductionRepo from "./deduction-repository.js";
+import { computeDeduction, splitForLine, type CoverageTier } from "@goben/rate-engine";
 import { buildElectionReview, deriveReviewRow, type ElectionReview, type ElectionReviewRow } from "./election-review.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -434,6 +436,80 @@ export async function approveAllReadyElections(ctx: AuthContext, employerId: str
   if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
   const n = await reviewRepo.approveAllReady(db, planYearId);
   return { ok: true, message: `${n} election(s) approved`, id: null };
+}
+
+/** Age in whole years at a date (nulls → null: composite rates only). */
+function ageAt(dateOfBirth: string | null, asOf: string | null): number | null {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth + "T00:00:00Z");
+  const ref = new Date((asOf ?? new Date().toISOString().slice(0, 10)) + "T00:00:00Z");
+  let age = ref.getUTCFullYear() - dob.getUTCFullYear();
+  const beforeBirthday =
+    ref.getUTCMonth() < dob.getUTCMonth() ||
+    (ref.getUTCMonth() === dob.getUTCMonth() && ref.getUTCDate() < dob.getUTCDate());
+  if (beforeBirthday) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+/**
+ * Generate payroll deductions for a plan year (Phase E-2). Authorizes on
+ * `payroll.manage` (employer_admin only — payroll is employer-level per the
+ * product decision in IMPLEMENTATION_STATUS). For every APPROVED, non-waived
+ * election: resolve the plan's rate band (exact age band when the employee's DOB
+ * is known, else composite), split employer/employee via the contribution rule
+ * (@goben/rate-engine — the golden-master math), and persist ONE per-paycheck
+ * deduction row per election (idempotent replace; the election's cost columns
+ * update in the same transaction, which clears the review queue's "missing cost"
+ * issue). Pay frequency comes from employee_payroll, defaulting to 26 (bi-weekly).
+ * Elections whose plan has no usable rate are SKIPPED and counted — never guessed.
+ * Synchronous locally; the JobHandle shape is kept for the prod SQS path.
+ */
+export async function generatePayrollDeductions(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string
+): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "payroll.manage", employerId);
+  const pyStatus = await planYearStatusOf(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+
+  const [elections, rule] = await Promise.all([
+    deductionRepo.listApprovedElections(db, planYearId),
+    deductionRepo.getFullContributionRule(db),
+  ]);
+
+  let generated = 0;
+  let skipped = 0;
+  for (const el of elections) {
+    const rate = await deductionRepo.getRateBand(db, el.planId, ageAt(el.dateOfBirth, el.effectiveDate));
+    if (!rate) { skipped += 1; continue; }
+    let amounts;
+    try {
+      amounts = computeDeduction({
+        rate,
+        tier: el.tier as CoverageTier,
+        split: splitForLine(el.benefitTypeKey, rule),
+        paysPerYear: el.payFrequency ? Number(el.payFrequency) : 26,
+      });
+    } catch {
+      skipped += 1; // plan doesn't offer the elected tier — surfaced via skip count
+      continue;
+    }
+    await deductionRepo.replaceEngineDeduction(db, {
+      electionId: el.electionId,
+      employeeId: el.employeeId,
+      perPayEe: amounts.perPayEe,
+      perPayEr: amounts.perPayEr,
+      perPayTotal: amounts.perPayTotal,
+      effectiveDate: el.effectiveDate,
+    });
+    generated += 1;
+  }
+  return {
+    jobId: randomUUID(),
+    status: `completed: ${generated} deduction(s) generated${skipped ? `, ${skipped} skipped (no usable rate/tier)` : ""}`,
+  };
 }
 
 const WINDOW_TYPES = new Set(["open_enrollment", "new_hire", "life_event"]);

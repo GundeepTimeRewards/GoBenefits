@@ -108,6 +108,10 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "createEnrollmentWindow":
       return employerService.createEnrollmentWindow(ctx, a.employerId, a.planYearId, a.input);
 
+    // Deduction generation (Phase E-2) — golden-master rate engine; payroll.manage.
+    case "generatePayrollDeductions":
+      return employerService.generatePayrollDeductions(ctx, a.employerId, a.planYearId);
+
     // --- Elections Review (Phase E-1) — read on election.read; mutations on election.manage ---
     case "electionReview":
       return employerService.electionReview(ctx, a.employerId, a.planYearId);

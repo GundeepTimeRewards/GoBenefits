@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -b",
     "schema:validate": "bun scripts/validate-schema.ts",
-    "typecheck": "bun x tsc --noEmit -p packages/data-access/tsconfig.json && bun x tsc --noEmit -p packages/census/tsconfig.json && bun x tsc --noEmit -p packages/employer/tsconfig.json && bun x tsc --noEmit -p api/resolvers/tsconfig.json && bun x tsc --noEmit -p migration/runner/tsconfig.json && bun x tsc --noEmit -p apps/web/tsconfig.json",
+    "typecheck": "bun x tsc --noEmit -p packages/data-access/tsconfig.json && bun x tsc --noEmit -p packages/census/tsconfig.json && bun x tsc --noEmit -p packages/employer/tsconfig.json && bun x tsc --noEmit -p packages/rate-engine/tsconfig.json && bun x tsc --noEmit -p api/resolvers/tsconfig.json && bun x tsc --noEmit -p migration/runner/tsconfig.json && bun x tsc --noEmit -p apps/web/tsconfig.json",
     "migrate:control-plane": "bun packages/data-access/src/cli/migrate.ts control-plane",
     "test": "bun test",
     "test:unit": "bun test packages/census/test/validation.test.ts packages/census/test/dependent-validation.test.ts packages/census/test/employee-number.test.ts packages/data-access/test/scope-decision.test.ts packages/data-access/test/role-mapping.test.ts",
