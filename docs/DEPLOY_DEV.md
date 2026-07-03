@@ -59,31 +59,47 @@ aws lambda invoke --function-name "$MIGRATOR" /dev/stdout
 # expect: {"applied":["0001_init.sql","0002_seed_reference_data.sql","0003_phase_c_grants.sql"]}
 ```
 
-## 5. Provision one test tenant
-`TenantProvisionerFn` creates a customer DB, applies the customer schema, and registers
-the employer in `control_plane.employer`.
+## 5. Create a Cognito test user + get its real `sub`
 ```bash
-PROVISIONER=$(aws cloudformation describe-stack-resource --stack-name goben-dev \
-  --logical-resource-id TenantProvisionerFn --query 'StackResourceDetail.PhysicalResourceId' --output text)
-aws lambda invoke --function-name "$PROVISIONER" \
-  --payload '{"legalName":"Dev Employer A"}' --cli-binary-format raw-in-base64-out /dev/stdout
-# returns { employerId, dbName, applied } — note the employerId (used below as <EMP_ID>).
-```
-
-## 6. Create a Cognito test user + get its real `sub`
-```bash
-UP=<UserPoolId>; CLIENT=<UserPoolClientId>
+UP=<UserPoolId>
 aws cognito-idp admin-create-user --user-pool-id "$UP" --username hr.a@dev --message-action SUPPRESS
 aws cognito-idp admin-set-user-password --user-pool-id "$UP" --username hr.a@dev --password 'Str0ng!Passw0rd' --permanent
 # Real Cognito sub (this is what event.identity.sub carries):
 SUB=$(aws cognito-idp admin-get-user --user-pool-id "$UP" --username hr.a@dev \
   --query 'UserAttributes[?Name==`sub`].Value' --output text); echo "$SUB"
 ```
-**Token for smoke tests:** use the **dev-only smoke-test client**
-(`DevTestUserPoolClientId` stack output; created only when `Env=dev` via the `IsDev`
-condition — staging/prod never create it). It allows `ADMIN_USER_PASSWORD_AUTH` so no SRP
-helper is needed. The **primary app client remains SRP-only** (production posture) — do
-not modify it for testing.
+
+## 6. Provision one test tenant + seed identity/plan year (one invoke, no bastion)
+`TenantProvisionerFn` creates the customer DB, applies the customer schema, registers the
+employer in `control_plane.employer`, and — with the **optional seed fields** — also
+upserts the smoke user (`user_account` bound to the REAL `<SUB>`), its
+`user_employer_access` grant, and one **active plan year** in the tenant DB. This
+replaces the old manual-SQL step: **no bastion or direct Aurora access is needed**
+(Aurora is in private subnets; the provisioner Lambda runs inside the VPC).
+```bash
+PROVISIONER=$(aws cloudformation describe-stack-resource --stack-name goben-dev \
+  --logical-resource-id TenantProvisionerFn --query 'StackResourceDetail.PhysicalResourceId' --output text)
+aws lambda invoke --function-name "$PROVISIONER" \
+  --payload "{\"legalName\":\"Dev Employer A\",\"adminCognitoSub\":\"$SUB\",\"adminEmail\":\"hr.a@dev\",\"seedPlanYear\":2026}" \
+  --cli-binary-format raw-in-base64-out /dev/stdout
+# → { employerId, dbName, applied, adminUserId, planYearId }
+#   note employerId (<EMP_ID>) and planYearId (<PY>) for the smoke tests below.
+```
+Seed-field notes:
+- All seed fields are **optional** — omit them and the provisioner behaves exactly as before.
+- `adminRoleKey` defaults to `employer_admin`; only employer-scoped roles are allowed
+  (`employer_admin`, `broker`, `employer_read_only`, `employee`) — platform/support/agency
+  roles are rejected (no privilege escalation via bootstrap).
+- The seed is **idempotent**: re-invoking with the same payload updates rather than
+  duplicates (`cognito_sub`, access-grant PK, and `plan_year.year` unique keys).
+- `seedPlanYear` accepts a bare year (`2026` → "2026 Benefits", active) or
+  `{ "year": 2026, "label": "...", "status": "setup|active|archived" }`.
+
+## 7. Get an ID token (dev smoke-test client)
+Use the **dev-only smoke-test client** (`DevTestUserPoolClientId` stack output; created
+only when `Env=dev` via the `IsDev` condition — staging/prod never create it). It allows
+`ADMIN_USER_PASSWORD_AUTH` so no SRP helper is needed. The **primary app client remains
+SRP-only** (production posture) — do not modify it for testing.
 ```bash
 DEV_CLIENT=<DevTestUserPoolClientId>   # from stack outputs (dev only)
 aws cognito-idp admin-initiate-auth --user-pool-id "$UP" --client-id "$DEV_CLIENT" \
@@ -94,27 +110,6 @@ aws cognito-idp admin-initiate-auth --user-pool-id "$UP" --client-id "$DEV_CLIEN
 Use the **ID token** as the `Authorization` header below. Note: the pool has
 **optional TOTP MFA** (`SOFTWARE_TOKEN_MFA`); test users that haven't enrolled an
 authenticator simply sign in with password only.
-
-## 7. Seed identity + one plan year
-The handler maps `event.identity.sub → user_account.cognito_sub`, so seed a row with the
-**real** `<SUB>` (synthetic local subs won't match). Run these against the control-plane
-DB (via a bastion / RDS query editor / a one-off admin invoke), substituting `<SUB>` and
-`<EMP_ID>` from steps 5–6:
-```sql
--- control_plane
-INSERT INTO user_account (id, cognito_sub, email, role_id, agency_id, broker_id, status)
-SELECT UUID_TO_BIN(UUID()), '<SUB>', 'hr.a@dev', r.id, NULL, NULL, 'active'
-  FROM role r WHERE r.key_name = 'employer_admin'
-ON DUPLICATE KEY UPDATE email = VALUES(email);
-INSERT IGNORE INTO user_employer_access (user_account_id, employer_id)
-SELECT u.id, UUID_TO_BIN('<EMP_ID>') FROM user_account u WHERE u.cognito_sub = '<SUB>';
-```
-```sql
--- in the provisioned customer DB (dbName from step 5): one active plan year
-INSERT INTO plan_year (id, label, year, period_start, period_end, status) VALUES
-  (UUID_TO_BIN(UUID()), 'PY 2026', 2026, '2026-01-01', '2026-12-31', 'active')
-ON DUPLICATE KEY UPDATE status = VALUES(status);
-```
 
 ## 8. C1 smoke checklist — all 14 operations
 POST to `GraphQLApiUrl` with header `Authorization: <ID token>`. `<EMP>` = `<EMP_ID>`.
