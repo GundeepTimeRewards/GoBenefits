@@ -58,6 +58,9 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return myEmployers(ctx);
     case "employer":
       return employerService.getEmployer(ctx, a.employerId);
+    // Employer Overview dashboard rollup (Phase D-4) — composes D-1/D-2/D-3.
+    case "employerOverview":
+      return employerService.employerOverview(ctx, a.employerId, a.planYearId);
 
     // --- Plan years ---
     case "planYears":

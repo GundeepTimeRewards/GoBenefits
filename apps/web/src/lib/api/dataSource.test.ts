@@ -23,9 +23,14 @@ describe("decideDataSource", () => {
     expect(decideDataSource("mock", true, "me")).toBe("mock");
   });
 
-  test("hybrid + non-C1 hook → mock", () => {
+  test("hybrid + non-live-capable hook → mock", () => {
     expect(decideDataSource("hybrid", true, "payrollWorkspace", LIVE_ID)).toBe("mock");
-    expect(decideDataSource("hybrid", true, "employerOverview", LIVE_ID)).toBe("mock");
+    expect(decideDataSource("hybrid", true, "complianceWorkspace", LIVE_ID)).toBe("mock");
+  });
+
+  test("employerOverview is live-capable (Phase D-4)", () => {
+    expect(decideDataSource("hybrid", true, "employerOverview", LIVE_ID)).toBe("live");
+    expect(decideDataSource("hybrid", true, "employerOverview", MOCK_ID)).toBe("mock");
   });
 
   test("hybrid + C1 hook + live api enabled → live (no id required)", () => {

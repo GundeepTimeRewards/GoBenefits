@@ -24,6 +24,7 @@ import {
   type EnrollmentProgress,
   type EnrollmentCenter,
 } from "./enrollment.js";
+import { buildEmployerOverview, type EmployerOverview } from "./overview.js";
 import type { Employer, PlanYear } from "./types.js";
 
 /** All plan years for an employer (top-bar plan-year selector + Plan Years overview). */
@@ -108,6 +109,42 @@ export async function benefitPlanDetail(
 async function planYearStatusOf(db: import("mysql2/promise").Pool, planYearId: string): Promise<string | null> {
   const [rows] = await db.query(`SELECT status FROM plan_year WHERE id = UUID_TO_BIN(:planYearId) LIMIT 1`, { planYearId });
   return (rows as any[])[0]?.status ?? null;
+}
+
+async function planYearLabelStatus(db: import("mysql2/promise").Pool, planYearId: string): Promise<{ label: string | null; status: string | null }> {
+  const [rows] = await db.query(`SELECT label, status FROM plan_year WHERE id = UUID_TO_BIN(:planYearId) LIMIT 1`, { planYearId });
+  const r = (rows as any[])[0];
+  return { label: r?.label ?? null, status: r?.status ?? null };
+}
+
+/**
+ * Employer Overview rollup (Phase D-4) — a compact dashboard read model that COMPOSES the
+ * D-1 checklist, D-2 catalog, and D-3 enrollment counts. Authorizes on `employer.read`
+ * (both broker and employer_admin already hold it — no new grant), fail-closed inside
+ * getCustomerDb. Read-only; aggregate counts only (no row-level data). Reuses the existing
+ * repositories rather than re-deriving.
+ */
+export async function employerOverview(ctx: AuthContext, employerId: string, planYearId: string): Promise<EmployerOverview> {
+  const { db } = await getCustomerDb(ctx, "employer.read", employerId);
+  const cp = await controlPlanePool();
+  const event = await enrollmentRepo.getOeEvent(db, planYearId);
+  const [py, defs, overrides, domain, catalogPlans, benefitTypes, rule, { counts }] = await Promise.all([
+    planYearLabelStatus(db, planYearId),
+    setupRepo.listStepDefinitions(cp),
+    setupRepo.listStepOverrides(db, planYearId),
+    setupRepo.planYearSetupState(db, planYearId),
+    catalogRepo.listCatalogPlans(db, planYearId),
+    catalogRepo.listBenefitTypes(cp),
+    catalogRepo.getContributionRule(db),
+    enrollmentRepo.getEnrollmentCounts(db, cp, planYearId, event),
+  ]);
+  const checklist = deriveChecklist(employerId, planYearId, defs, overrides, domain);
+  const catalog = buildPlanCatalog(employerId, planYearId, py.status, catalogPlans, benefitTypes, rule);
+  return buildEmployerOverview({
+    employerId, planYearId,
+    planYearLabel: py.label, planYearStatus: py.status,
+    checklist, catalogPlans: catalog.plans, counts,
+  });
 }
 
 /**
