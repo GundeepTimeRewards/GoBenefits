@@ -42,6 +42,17 @@ describe("buildVariables — representative operations", () => {
     });
   });
 
+  test("dependents: employerId + employeeId", () => {
+    expect(operations.dependents.buildVariables({ employerId: "e1", employeeId: "emp9" })).toEqual({
+      employerId: "e1",
+      employeeId: "emp9",
+    });
+  });
+
+  test("planYears: employerId only", () => {
+    expect(operations.planYears.buildVariables({ employerId: "e1" })).toEqual({ employerId: "e1" });
+  });
+
   test("createEmployee: wraps input and drops undefined fields", () => {
     const vars = operations.createEmployee.buildVariables({
       input: { employerId: "e1", firstName: "Ada", lastName: "Lovelace", email: undefined },

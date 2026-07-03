@@ -14,3 +14,4 @@ export * from "./documentHooks";
 export * from "./config";
 export * from "./client";
 export * from "./operations";
+export * from "./dataSource";

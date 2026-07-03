@@ -85,3 +85,67 @@ Mock stays default until the backend is deployed and smoke-tested. The swap is t
 in each hook, when `isLiveApiEnabled()`, point the `queryFn`/`mutationFn` at
 `runOperation(graphqlClient, operations.<name>, args)` instead of the mock getter —
 query keys and component code stay the same.
+
+## Running mock vs hybrid local-live (C2-FE-2)
+
+**Mock mode (default) — no backend required:**
+```
+bun run dev            # from apps/web  (VITE_DATA_SOURCE defaults to mock)
+```
+Every screen uses `lib/mock/db.ts`. Nothing calls the network.
+
+**Hybrid local-live mode — C1 foundation reads come from real local MySQL:**
+```
+# 1) one-time / when schema or seed changes:
+bun local/setup.ts                         # from repo root (needs local MySQL)
+
+# 2) start the local GraphQL dev endpoint (dispatches to the real resolver over MySQL):
+bun run dev:graphql                        # http://localhost:4000/graphql  (GraphiQL enabled)
+
+# 3) run the web app in hybrid mode (apps/web/.env.local):
+VITE_DATA_SOURCE=hybrid
+VITE_USE_LIVE_API=true
+VITE_GRAPHQL_ENDPOINT=http://localhost:4000/graphql
+VITE_DEV_AUTH_SUB=sub-emp-admin-a          # which seeded persona to act as
+VITE_SHOW_DATA_SOURCE_BADGE=true           # optional: force the dev badge
+```
+Then `bun run dev`. **Only C1 read hooks** (`me`, `myEmployers`, `employer`, `planYears`,
+`currentPlanYear`, `employees`, `employerCensusContext`, `employeeDetail`, `dependents`)
+read live — and only for **live (UUID) employer ids**, to avoid mixing id-spaces with the
+mock slug employers. All other hooks stay mock. If the endpoint/auth env is missing, hybrid
+falls back to mock (a dev warning is logged and the badge shows `hybrid-fallback`).
+
+**GraphiQL explorer:** open `http://localhost:4000/graphql` in a browser. Set an
+`x-dev-auth-sub` header (GraphiQL → Headers) to a seeded sub to authorize.
+
+**Seeded dev auth subs (local only — NOT real Cognito):**
+| sub | role | scope |
+|---|---|---|
+| `sub-platform` | super_admin | all employers |
+| `sub-support` | support | all employers |
+| `sub-agency` | agency_admin | agency's employers |
+| `sub-broker-a` | broker | Employer A |
+| `sub-emp-admin-a` | employer_admin | Employer A |
+| `sub-emp-admin-b` | employer_admin | Employer B |
+| `sub-employee-a` | employee | Employer A (self-service; not a C1 read surface) |
+
+**C1 smoke test** (server running + `bun local/setup.ts` done):
+```
+bun run smoke:c1                           # or: DEV_AUTH_SUB=sub-broker-a bun run smoke:c1
+```
+Exercises `me`, `myEmployers`, `planYears`, `employees`, `employeeDetail`, `dependents`
+end-to-end against the local endpoint. No AWS.
+
+**Dev source indicator:** a tiny corner badge (dev builds only) shows `mock` /
+`hybrid-live` / `hybrid-fallback`; hidden in production and in default mock mode unless
+`VITE_SHOW_DATA_SOURCE_BADGE=true`. `getDataSourceDiagnostics()` is available in devtools.
+
+## What remains before mutation hooks / full C2 swap
+- **Mutation hooks** (`createEmployee`, `updateEmployee`, `addDependent`, `updateDependent`,
+  `removeDependent`) are **not** wired yet — the operation wrappers exist; the `useMutation`
+  hooks + optimistic/invalidations are a fast-follow.
+- **Live employer selection**: the switcher/routes still center on mock slug ids; to drive
+  hybrid across a whole screen, the active employer must be a live UUID (from `myEmployers`).
+- **Deployed backend**: hybrid uses the *local* endpoint; AppSync live needs FOUNDATION-DEPLOY
+  (Cognito MFA fix + a target AWS account) and real Cognito auth in place of the dev sub shim.
+- **Non-C1 hooks** stay mock until their Phase D–F resolvers exist.

@@ -90,7 +90,10 @@ export function createGraphQLClient(options: GraphQLClientOptions = {}): GraphQL
         throw new GraphQLClientError("Network", `Network error contacting GraphQL endpoint: ${(e as Error).message}`, e);
       }
 
-      let payload: { data?: TData; errors?: Array<{ message?: string; errorType?: string }> };
+      let payload: {
+        data?: TData;
+        errors?: Array<{ message?: string; errorType?: string; extensions?: { errorType?: string } }>;
+      };
       try {
         payload = (await res.json()) as typeof payload;
       } catch (e) {
@@ -99,9 +102,12 @@ export function createGraphQLClient(options: GraphQLClientOptions = {}): GraphQL
 
       // GraphQL errors are reported in `errors[]` even on HTTP 200. Map the first one's
       // errorType to our typed error so callers can branch on Unauthorized/ValidationError.
+      // AppSync puts `errorType` at the top level; spec GraphQL servers (the local yoga
+      // dev endpoint) put it under `extensions.errorType` — accept either.
       if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
         const first = payload.errors[0];
-        throw new GraphQLClientError(mapErrorType(first?.errorType), first?.message ?? "GraphQL error", payload.errors);
+        const errorType = first?.errorType ?? first?.extensions?.errorType;
+        throw new GraphQLClientError(mapErrorType(errorType), first?.message ?? "GraphQL error", payload.errors);
       }
 
       if (!res.ok) {
