@@ -188,3 +188,45 @@ Regular `bun run smoke:c1` is read-only and never mutates.
   (Cognito MFA fix + target account) + real Cognito auth in place of the dev sub shim.
 - **Non-C1 hooks/screens** (aggregate workspaces, employee self-service) remain mock-only
   until their Phase D–F backends exist.
+
+## Hybrid UI end-to-end (C2-FE-4)
+
+C2-FE-4 aligns the **active employer** and **active plan-year** contexts to the live UUID
+id-space when hybrid mode is on, so the full C1 flow works in the browser. Mock mode is
+unchanged (mock slugs). The employer switcher options come from `myEmployers` (live UUIDs
+in hybrid); selecting an employer updates the plan-year context and refetches the
+employer-scoped C1 reads (keyed by `employerId`). Employers with no plan year resolve to an
+empty plan-year id gracefully.
+
+### Run it end-to-end locally
+```
+# 1) DB + endpoint
+bun local/setup.ts
+bun run dev:graphql                         # http://localhost:4000/graphql
+
+# 2) apps/web/.env.local
+VITE_DATA_SOURCE=hybrid
+VITE_USE_LIVE_API=true
+VITE_GRAPHQL_ENDPOINT=http://localhost:4000/graphql
+VITE_DEV_AUTH_SUB=sub-emp-admin-a           # or sub-broker-a / sub-agency / sub-platform
+
+# 3) frontend
+bun run dev
+```
+
+### Manual hybrid UI smoke checklist
+- [ ] Employer switcher lists **live** employers (UUID-backed; e.g. "Employer A").
+- [ ] Selecting a live employer navigates within `/employers/<uuid>/…` (no mock slug).
+- [ ] Plan-year switcher shows the employer's live plan years; active PY = live current.
+- [ ] Census page loads live employees + census KPIs for the selected employer.
+- [ ] Employee detail loads a live employee; dependents tab shows live dependents.
+- [ ] **Add Employee** persists (row appears after refetch).
+- [ ] **Edit Employee** persists.
+- [ ] **Add / Edit / Remove Dependent** persist and refresh the dependents list.
+- [ ] The dev badge reads `hybrid-live`.
+- [ ] Aggregate/non-C1 screens (dashboard, plans & rates, enrollment, payroll, compliance)
+      remain **mock** (their hooks are not live-capable).
+- [ ] An employer with no plan year does not crash (plan-year switcher hides / empty state).
+
+Reset after mutating: `bun local/setup.ts`. Automated proof of the read + mutation paths:
+`bun run smoke:c1` and `SMOKE_MUTATIONS=true bun run smoke:c1`.
