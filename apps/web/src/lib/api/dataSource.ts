@@ -33,6 +33,8 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "planYears",
   "currentPlanYear",
   "planYearSetupStatus", // Phase D-1 (plan-year-scoped: gate on a live UUID planYearId)
+  "planCatalog", // Phase D-2 (plan-year-scoped)
+  "benefitPlanDetail", // Phase D-2 (plan-year + planId-scoped)
   "employees",
   "employerCensusContext",
   "employeeDetail",

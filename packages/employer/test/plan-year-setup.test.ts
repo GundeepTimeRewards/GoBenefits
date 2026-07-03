@@ -46,10 +46,13 @@ describe("planYearSetupStatus (integration)", () => {
     // Domains wired in v1 light up from real seed data:
     expect(byKey.census_imported).toBe("complete"); // Employer A has employees
     expect(byKey.readiness_review).toBe("complete"); // PY 2026 is active
-    // Un-wired domains are honestly not_started (not faked complete):
-    expect(byKey.plans_configured).toBe("not_started");
-    expect(byKey.rates_configured).toBe("not_started");
+    // D-2 domains now light up from the Plans & Rates fixtures:
+    expect(byKey.plans_configured).toBe("complete"); // 2 complete benefit plans
+    expect(byKey.rates_configured).toBe("complete"); // plan_rate rows exist
+    expect(byKey.contributions_configured).toBe("complete"); // a contribution_rule exists
+    // Un-wired domains are still honestly not_started (not faked complete):
     expect(byKey.documents_configured).toBe("not_started");
+    expect(byKey.window_configured).toBe("not_started");
 
     // completionPct/blockers are server-computed (required-based; 2 of the required-
     // applicable steps complete). Values are bounded and consistent.

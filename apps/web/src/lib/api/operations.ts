@@ -72,6 +72,7 @@ export type UpdateDependentInput = Omit<CreateDependentInput, "employeeId"> & {
   dependentId: string;
   employeeId?: string;
 };
+export type PlanDetailArgs = { employerId: string; planYearId: string; planId: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -96,6 +97,26 @@ const PLAN_YEAR_SETUP_STATUS = `query PlanYearSetupStatus($employerId: ID!, $pla
   planYearSetupStatus(employerId: $employerId, planYearId: $planYearId) {
     employerId planYearId completionPct blockers
     steps { key label description category requiredByDefault status route message }
+  }
+}`;
+
+const PLAN_CATALOG = `query PlanCatalog($employerId: ID!, $planYearId: ID!) {
+  planCatalog(employerId: $employerId, planYearId: $planYearId) {
+    employerId planYearId readOnly
+    summary { total ready missingRates missingContributions missingDocuments launchBlockers }
+    plans { planId name carrier line benefitType subtype status effective enrolled coverageTiers
+            rateStatus contributionStatus contributionRule documentStatus eligibleClasses launchBlocker warnings }
+  }
+}`;
+
+const BENEFIT_PLAN_DETAIL = `query BenefitPlanDetail($employerId: ID!, $planYearId: ID!, $planId: ID!) {
+  benefitPlanDetail(employerId: $employerId, planYearId: $planYearId, planId: $planId) {
+    planId name carrier line subtype network fundingType effective renewalDate enrolled status
+    benefits { label inNetwork outNetwork }
+    rates { tier total employer employee }
+    contributions { tier employer employee }
+    eligibility { class waiting note }
+    documents { name type date }
   }
 }`;
 
@@ -150,6 +171,8 @@ export const operations = {
   planYears: { name: "planYears", kind: "query", document: PLAN_YEARS, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   currentPlanYear: { name: "currentPlanYear", kind: "query", document: CURRENT_PLAN_YEAR, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   planYearSetupStatus: { name: "planYearSetupStatus", kind: "query", document: PLAN_YEAR_SETUP_STATUS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  planCatalog: { name: "planCatalog", kind: "query", document: PLAN_CATALOG, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  benefitPlanDetail: { name: "benefitPlanDetail", kind: "query", document: BENEFIT_PLAN_DETAIL, buildVariables: (a: PlanDetailArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, planId: a.planId }) } as C1Operation<PlanDetailArgs, unknown>,
   employerCensusContext: { name: "employerCensusContext", kind: "query", document: EMPLOYER_CENSUS_CONTEXT, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   employees: { name: "employees", kind: "query", document: EMPLOYEES, buildVariables: (a: EmployeesArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, search: a.search, limit: a.limit, nextToken: a.nextToken }) } as C1Operation<EmployeesArgs, unknown>,
   employeeDetail: { name: "employeeDetail", kind: "query", document: EMPLOYEE_DETAIL, buildVariables: (a: EmployeeArgs) => ({ employerId: a.employerId, employeeId: a.employeeId }) } as C1Operation<EmployeeArgs, unknown>,

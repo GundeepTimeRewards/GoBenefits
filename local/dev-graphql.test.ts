@@ -73,6 +73,42 @@ describe("createDevSchema dispatch", () => {
     expect(calls[0].identity.sub).toBe("sub-emp-admin-a");
   });
 
+  test("dispatches planCatalog + benefitPlanDetail (Phase D-2)", async () => {
+    const calls: any[] = [];
+    const fake: ResolverHandler = async (event) => {
+      calls.push(event);
+      if (event.info.fieldName === "planCatalog") {
+        return { employerId: "e", planYearId: "py", readOnly: false,
+          summary: { total: 1, ready: 1, missingRates: 0, missingContributions: 0, missingDocuments: 1, launchBlockers: 0 },
+          plans: [{ planId: "p", name: "UHC", carrier: "UHC", line: "medical", benefitType: "Medical", subtype: "PPO",
+            status: "ready", effective: "2026-01-01", enrolled: 0, coverageTiers: 4, rateStatus: "complete",
+            contributionStatus: "configured", contributionRule: "Standard", documentStatus: "missing",
+            eligibleClasses: "Full-Time", launchBlocker: false, warnings: [] }] };
+      }
+      return { planId: "p", name: "UHC", carrier: "UHC", line: "medical", subtype: "PPO", network: null, fundingType: null,
+        effective: "2026-01-01", renewalDate: null, enrolled: 0, status: "active",
+        benefits: [], rates: [{ tier: "Employee Only", total: "$612.00", employer: "$489.60", employee: "$122.40" }],
+        contributions: [], eligibility: [], documents: [] };
+    };
+    const schema = createDevSchema(fake);
+    const cat = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!){ planCatalog(employerId: $e, planYearId: $py) { summary { total } plans { planId line rateStatus } } }`,
+      variableValues: { e: "e", py: "py" }, contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(cat.errors).toBeUndefined();
+    expect((cat.data as any).planCatalog.plans[0].line).toBe("medical");
+    const det = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!, $p: ID!){ benefitPlanDetail(employerId: $e, planYearId: $py, planId: $p) { planId rates { tier employee } } }`,
+      variableValues: { e: "e", py: "py", p: "p" }, contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(det.errors).toBeUndefined();
+    expect((det.data as any).benefitPlanDetail.rates[0].employee).toBe("$122.40");
+    expect(calls.map((c) => c.info.fieldName)).toEqual(["planCatalog", "benefitPlanDetail"]);
+    expect(calls[1].arguments).toMatchObject({ employerId: "e", planYearId: "py", planId: "p" });
+  });
+
   test("dispatches a mutation field too", async () => {
     const calls: any[] = [];
     const fake: ResolverHandler = async (event) => {
