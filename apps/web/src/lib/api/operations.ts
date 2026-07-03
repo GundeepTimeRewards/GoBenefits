@@ -106,6 +106,8 @@ export type ElectionActionArgs = { employerId: string; planYearId: string; elect
 export type SendBackElectionArgs = ElectionActionArgs & { note?: string };
 export type ElectionFlagArgs = { employerId: string; electionId: string };
 export type MapDeductionCodeArgs = { employerId: string; deductionId: string; code: string };
+export type LifeEventCaseArgs = { employerId: string; caseId: string };
+export type DenyLifeEventArgs = LifeEventCaseArgs & { reason?: string };
 export type ReconcileBatchArgs = { employerId: string; batchId: string };
 
 // --- Documents ---------------------------------------------------------------
@@ -314,6 +316,41 @@ const RECONCILE_BATCH = `mutation ReconcileBatch($employerId: ID!, $batchId: ID!
   reconcileBatch(employerId: $employerId, batchId: $batchId) { id status }
 }`;
 
+// Life events (Phase E-4) + Documents (Phase E-3).
+const LIFE_EVENT_CASE_FIELDS = `{ id employee eventType status documents electionWindow nextStep submitted }`;
+const LIFE_EVENT_QUEUE = `query LifeEventQueue($employerId: ID!, $planYearId: ID!) {
+  lifeEventQueue(employerId: $employerId, planYearId: $planYearId) {
+    readOnly
+    counts { pendingReview needsDocuments electionWindowsOpen carrierPending completedThisMonth }
+    tasks { key label count }
+    cases ${LIFE_EVENT_CASE_FIELDS}
+  }
+}`;
+const APPROVE_LIFE_EVENT = `mutation ApproveLifeEvent($employerId: ID!, $caseId: ID!) {
+  approveLifeEvent(employerId: $employerId, caseId: $caseId) ${LIFE_EVENT_CASE_FIELDS}
+}`;
+const DENY_LIFE_EVENT = `mutation DenyLifeEvent($employerId: ID!, $caseId: ID!, $reason: String) {
+  denyLifeEvent(employerId: $employerId, caseId: $caseId, reason: $reason) ${LIFE_EVENT_CASE_FIELDS}
+}`;
+const REQUEST_LIFE_EVENT_DOCS = `mutation RequestLifeEventDocs($employerId: ID!, $caseId: ID!) {
+  requestLifeEventDocs(employerId: $employerId, caseId: $caseId) ${ACTION_RESULT_FIELDS}
+}`;
+const OPEN_ELECTION_WINDOW = `mutation OpenElectionWindow($employerId: ID!, $caseId: ID!) {
+  openElectionWindow(employerId: $employerId, caseId: $caseId) ${ACTION_RESULT_FIELDS}
+}`;
+const DOCUMENT_WORKSPACE = `query DocumentWorkspace($employerId: ID!, $planYearId: ID!) {
+  documentWorkspace(employerId: $employerId, planYearId: $planYearId) {
+    readOnly readinessPercent missingCount employeeActionCount expiringSoonCount
+    issues { key label count tone }
+    tasks { key label related priority area }
+    categories { title total sub }
+    documents { documentId name category type coverage carrier relatedTo requiredFor status expiresAt uploadedAt }
+  }
+}`;
+const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!, $planYearId: ID!) {
+  generateConfirmations(employerId: $employerId, planYearId: $planYearId) { jobId status }
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -359,6 +396,13 @@ export const operations = {
   mapDeductionCode: { name: "mapDeductionCode", kind: "mutation", document: MAP_DEDUCTION_CODE, buildVariables: (a: MapDeductionCodeArgs) => ({ employerId: a.employerId, deductionId: a.deductionId, code: a.code }) } as C1Operation<MapDeductionCodeArgs, unknown>,
   exportReadyDeductions: { name: "exportReadyDeductions", kind: "mutation", document: EXPORT_READY_DEDUCTIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   reconcileBatch: { name: "reconcileBatch", kind: "mutation", document: RECONCILE_BATCH, buildVariables: (a: ReconcileBatchArgs) => ({ employerId: a.employerId, batchId: a.batchId }) } as C1Operation<ReconcileBatchArgs, unknown>,
+  lifeEventQueue: { name: "lifeEventQueue", kind: "query", document: LIFE_EVENT_QUEUE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  approveLifeEvent: { name: "approveLifeEvent", kind: "mutation", document: APPROVE_LIFE_EVENT, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
+  denyLifeEvent: { name: "denyLifeEvent", kind: "mutation", document: DENY_LIFE_EVENT, buildVariables: (a: DenyLifeEventArgs) => compact({ employerId: a.employerId, caseId: a.caseId, reason: a.reason }) } as C1Operation<DenyLifeEventArgs, unknown>,
+  requestLifeEventDocs: { name: "requestLifeEventDocs", kind: "mutation", document: REQUEST_LIFE_EVENT_DOCS, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
+  openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
+  documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

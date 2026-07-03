@@ -63,6 +63,13 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "mapDeductionCode",
   "exportReadyDeductions",
   "reconcileBatch",
+  "lifeEventQueue", // Phase E-4 (plan-year-scoped read)
+  "approveLifeEvent",
+  "denyLifeEvent",
+  "requestLifeEventDocs",
+  "openElectionWindow",
+  "documentWorkspace", // Phase E-3 (plan-year-scoped read)
+  "generateConfirmations",
   "electionReview", // Phase E-1 (plan-year-scoped read)
   "approveElection",
   "sendBackElection",

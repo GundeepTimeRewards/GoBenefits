@@ -390,3 +390,37 @@ export function useReconcileBatch(employerId: string) {
     },
   });
 }
+
+// --- Life-event decisions + document confirmations (Phase E-6) --------------------
+const LIFE_EVENT_READS = ["lifeEventQueue", "employerOverview", "enrollmentCenter"];
+const DOCUMENT_READS = ["documentWorkspace", "planYearSetup", "planCatalog", "employerOverview"];
+
+function useGatedMutation<TArgs>(op: keyof typeof operations, employerId: string, reads: string[]) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, TArgs>({
+    mutationFn: async (args) => {
+      if (resolveDataSource(op as string, employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations[op] as never, { ...(args as Record<string, unknown>), employerId } as never));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(reads);
+    },
+  });
+}
+
+export function useApproveLifeEvent(employerId: string) {
+  return useGatedMutation<{ caseId: string }>("approveLifeEvent", employerId, LIFE_EVENT_READS);
+}
+export function useDenyLifeEvent(employerId: string) {
+  return useGatedMutation<{ caseId: string; reason?: string }>("denyLifeEvent", employerId, LIFE_EVENT_READS);
+}
+export function useRequestLifeEventDocs(employerId: string) {
+  return useGatedMutation<{ caseId: string }>("requestLifeEventDocs", employerId, LIFE_EVENT_READS);
+}
+export function useOpenElectionWindow(employerId: string) {
+  return useGatedMutation<{ caseId: string }>("openElectionWindow", employerId, LIFE_EVENT_READS);
+}
+export function useGenerateConfirmations(employerId: string) {
+  return useGatedMutation<{ planYearId: string }>("generateConfirmations", employerId, DOCUMENT_READS);
+}

@@ -438,3 +438,80 @@ export function mapDeductionsWorkspace(v: LiveDeductionsWorkspace): DeductionsWo
     })),
   };
 }
+
+// --- Life-event queue (Phase E-4) + Documents workspace (Phase E-3) ---------------
+import type {
+  LifeEventQueue as MockLifeEventQueue, LifeEventCase as MockLifeEventCase, LifeEventCaseStatus,
+  DocumentWorkspace as MockDocumentWorkspace, DocRow, DocStatus, DocCategoryName,
+  DocReadinessIssue, DocReadinessTone,
+} from "@/lib/mock/db";
+
+export type LiveLifeEventQueue = {
+  readOnly: boolean;
+  counts: MockLifeEventQueue["counts"];
+  tasks: { key: string; label: string; count: number }[];
+  cases: Array<{ id: string; employee: string; eventType: string; status: string; documents: string | null; electionWindow: string | null; nextStep: string | null; submitted: string | null }>;
+};
+
+export function mapLifeEventQueue(v: LiveLifeEventQueue): MockLifeEventQueue {
+  return {
+    readOnly: v.readOnly,
+    counts: v.counts,
+    tasks: v.tasks,
+    cases: v.cases.map((c): MockLifeEventCase => ({
+      id: c.id,
+      employee: c.employee,
+      eventType: c.eventType,
+      status: c.status as LifeEventCaseStatus, // live statuses use the same 5 labels
+      documents: c.documents ?? "N/A",
+      electionWindow: c.electionWindow ?? "Not opened",
+      nextStep: c.nextStep ?? "—",
+      submitted: c.submitted ?? "—",
+    })),
+  };
+}
+
+export type LiveDocumentWorkspace = {
+  readOnly: boolean; readinessPercent: number; missingCount: number;
+  employeeActionCount: number; expiringSoonCount: number;
+  issues: { key: string; label: string; count: number; tone: string }[];
+  tasks: { key: string; label: string; related: string; priority: string; area: string }[];
+  categories: { title: string; total: number; sub: string }[];
+  documents: Array<{ documentId: string; name: string; category: string; type: string | null; coverage: string | null; carrier: string | null; relatedTo: string | null; requiredFor: string | null; status: string; expiresAt: string | null; uploadedAt: string | null }>;
+};
+
+const DOC_STATUS: Record<string, DocStatus> = {
+  Active: "Published",
+  "Signature Pending": "Pending Employee Action",
+  Signed: "Published",
+  Archived: "Archived",
+};
+
+export function mapDocumentWorkspace(v: LiveDocumentWorkspace): MockDocumentWorkspace {
+  return {
+    readOnly: v.readOnly,
+    readinessPercent: v.readinessPercent,
+    missingCount: v.missingCount,
+    employeeActionCount: v.employeeActionCount,
+    expiringSoonCount: v.expiringSoonCount,
+    issues: v.issues.map((i): DocReadinessIssue => ({ key: i.key, label: i.label, count: i.count, tone: i.tone as DocReadinessTone })),
+    tasks: v.tasks.map((t) => ({
+      key: t.key, label: t.label, related: t.related, area: t.area,
+      priority: ((t.priority.charAt(0).toUpperCase() + t.priority.slice(1)) as "High" | "Medium" | "Low"),
+    })),
+    categories: v.categories.map((c) => ({ title: c.title as DocCategoryName, total: c.total, sub: c.sub })),
+    docs: v.documents.map((d): DocRow => ({
+      id: d.documentId,
+      name: d.name,
+      type: d.type ?? "—",
+      category: (d.category === "confirmation" ? "Employee Forms" : "Plan Documents") as DocCategoryName,
+      coverage: d.coverage ?? "—",
+      carrier: d.carrier ?? "—",
+      related: d.relatedTo ?? "—",
+      requiredFor: d.requiredFor ?? "—",
+      status: DOC_STATUS[d.status] ?? "Published",
+      uploaded: d.uploadedAt ? d.uploadedAt.slice(0, 10) : "—",
+      expires: d.expiresAt ?? "—",
+    })),
+  };
+}

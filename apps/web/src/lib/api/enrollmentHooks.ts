@@ -8,7 +8,7 @@ import { getEnrollment, getOpenEnrollmentDashboard, getLaunchReadiness, getEnrol
 import { resolvePlanYearScopedSource } from "./dataSource";
 import { graphqlClient } from "./client";
 import { operations, runOperation } from "./operations";
-import { mapEnrollmentProgress, mapEnrollmentCenter, mapElectionReview, type LiveEnrollmentProgress, type LiveEnrollmentCenter, type EnrollmentCenterView, type LiveElectionReview } from "./liveMappers";
+import { mapEnrollmentProgress, mapEnrollmentCenter, mapElectionReview, mapLifeEventQueue, type LiveEnrollmentProgress, type LiveEnrollmentCenter, type EnrollmentCenterView, type LiveElectionReview, type LiveLifeEventQueue } from "./liveMappers";
 
 export function useEnrollmentEvents(employerId: string) {
   return useQuery({ queryKey: ["enrollmentEvents", employerId], queryFn: () => getEnrollment(employerId) });
@@ -101,6 +101,18 @@ export function useElectionReview(employerId: string, planYearId: string) {
   });
 }
 
+/** Life-event HR queue (Phase E-6): live when both ids are live UUIDs; mock fallback. */
 export function useLifeEventQueue(employerId: string, planYearId: string) {
-  return useQuery({ queryKey: ["lifeEventQueue", employerId, planYearId], queryFn: () => getLifeEventQueue(employerId, planYearId) });
+  const live = resolvePlanYearScopedSource("lifeEventQueue", employerId, planYearId) === "live";
+  return useQuery({
+    queryKey: ["lifeEventQueue", live ? "live" : "mock", employerId, planYearId],
+    queryFn: live
+      ? async () => {
+          const r = (await runOperation(graphqlClient, operations.lifeEventQueue, { employerId, planYearId })) as {
+            lifeEventQueue: LiveLifeEventQueue;
+          };
+          return mapLifeEventQueue(r.lifeEventQueue);
+        }
+      : () => getLifeEventQueue(employerId, planYearId),
+  });
 }
