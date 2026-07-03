@@ -111,6 +111,15 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     // Deduction generation (Phase E-2) — golden-master rate engine; payroll.manage.
     case "generatePayrollDeductions":
       return employerService.generatePayrollDeductions(ctx, a.employerId, a.planYearId);
+    // Deductions workspace (Phase E-2b) — payroll.read is employer-level ONLY (0008).
+    case "deductionsWorkspace":
+      return employerService.deductionsWorkspace(ctx, a.employerId, a.planYearId);
+    case "mapDeductionCode":
+      return employerService.mapDeductionCode(ctx, a.employerId, a.deductionId, a.code);
+    case "exportReadyDeductions":
+      return employerService.exportReadyDeductions(ctx, a.employerId, a.planYearId);
+    case "reconcileBatch":
+      return employerService.reconcileBatch(ctx, a.employerId, a.batchId);
 
     // --- Elections Review (Phase E-1) — read on election.read; mutations on election.manage ---
     case "electionReview":

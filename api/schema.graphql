@@ -848,6 +848,9 @@ type Mutation {
   generateConfirmations(employerId: ID!, planYearId: ID!): JobHandle
 
   ## --- FUTURE: Deductions / payroll (Phase E) — NOT IMPLEMENTED ---
+  ## (Phase E-2b — IMPLEMENTED) exportReadyDeductions batches every code-assigned,
+  ## unexported rate-engine deduction; regeneration SUPERSEDES exported rows so batch
+  ## lines stay resolvable; reconcileBatch: generated/sent -> approved, exactly once.
   mapDeductionCode(employerId: ID!, deductionId: ID!, code: String!): DeductionReviewRow
   exportReadyDeductions(employerId: ID!, planYearId: ID!): JobHandle
   reconcileBatch(employerId: ID!, batchId: ID!): ExportBatch
