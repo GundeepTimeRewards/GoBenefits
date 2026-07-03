@@ -846,8 +846,13 @@ type Mutation {
   requestLifeEventDocs(employerId: ID!, caseId: ID!): ActionResult
   openElectionWindow(employerId: ID!, caseId: ID!): ActionResult
 
-  ## --- FUTURE: Documents (Phase E) — NOT IMPLEMENTED ---
-  uploadDocument(employerId: ID!, planYearId: ID!, category: String!, name: String!): Document
+  ## --- Documents (Phase E-3) — IMPLEMENTED, metadata-first ---
+  ## uploadDocument records the index row + links (the optional planId link drives
+  ## plan-doc readiness in the catalog); s3_key is reserved at insert and prod uploads
+  ## bytes against it via a presigned URL — local/dev intentionally stores NO file
+  ## bytes (product decision 2026-07-03). generateConfirmations creates one
+  ## confirmation doc + signature request per approved-election employee, idempotently.
+  uploadDocument(employerId: ID!, planYearId: ID!, category: String!, name: String!, planId: ID): Document
   requestSignature(employerId: ID!, documentId: ID!): ActionResult
   generateConfirmations(employerId: ID!, planYearId: ID!): JobHandle
 

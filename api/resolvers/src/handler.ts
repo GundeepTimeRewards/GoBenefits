@@ -135,6 +135,16 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "approveAllReadyElections":
       return employerService.approveAllReadyElections(ctx, a.employerId, a.planYearId);
 
+    // --- Documents (Phase E-3, metadata-first) — documents.read / documents.manage ---
+    case "documentWorkspace":
+      return employerService.documentWorkspace(ctx, a.employerId, a.planYearId);
+    case "uploadDocument":
+      return employerService.uploadDocument(ctx, a.employerId, a.planYearId, a.category, a.name, a.planId);
+    case "requestSignature":
+      return employerService.requestSignature(ctx, a.employerId, a.documentId);
+    case "generateConfirmations":
+      return employerService.generateConfirmations(ctx, a.employerId, a.planYearId);
+
     // --- Life events (Phase E-4) — HR queue + employee own-records self-service ---
     case "lifeEventQueue":
       return employerService.lifeEventQueue(ctx, a.employerId, a.planYearId);
