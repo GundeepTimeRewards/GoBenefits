@@ -8,7 +8,8 @@ import { StatusPill, LoadingCard, RoleNotAvailable } from "@/components/common";
 import { useRole } from "@/lib/role-context";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
-import { useEmployer, usePayrollWorkspace } from "@/lib/api";
+import { useEmployer, useDeductionsWorkspace } from "@/lib/api";
+import { useExportReadyDeductions, useReconcileBatch, useMapDeductionCode } from "@/lib/api/mutationHooks";
 import type { DeductionReviewStatus, ExportBatchStatus } from "@/lib/mock/db";
 
 // Deductions is the recurring per-pay-period workflow. Employer-level only.
@@ -53,8 +54,13 @@ export function DeductionsPage() {
   const planYearId = useActivePlanYearId();
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
-  const { data: ws } = usePayrollWorkspace(employerId, planYearId);
+  const { data: ws } = useDeductionsWorkspace(employerId, planYearId);
   const [tab, setTab] = useState<TabKey>("review");
+  const exportReady = useExportReadyDeductions(employerId);
+  const reconcile = useReconcileBatch(employerId);
+  const exportStatus = exportReady.data?.live
+    ? (exportReady.data.data as { exportReadyDeductions?: { status?: string } })?.exportReadyDeductions?.status
+    : null;
 
   if (PAYROLL_BLOCKED.has(role)) {
     return (
@@ -81,9 +87,12 @@ export function DeductionsPage() {
           <p className="mt-1 text-xs text-muted-foreground">{employer.name} · {py.label}</p>
         </div>
         {!readOnly && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm">Export Ready Deductions</Button>
-            <Button variant="ghost" size="sm">More</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {exportStatus && <span className="text-xs text-success">{exportStatus}</span>}
+            {exportReady.error && <span className="text-xs text-destructive">{exportReady.error.message}</span>}
+            <Button size="sm" disabled={exportReady.isPending} onClick={() => exportReady.mutate({ planYearId })}>
+              {exportReady.isPending ? "Exporting…" : "Export Ready Deductions"}
+            </Button>
           </div>
         )}
       </div>
@@ -114,7 +123,11 @@ export function DeductionsPage() {
                 <CardTitle className="flex items-center gap-2 text-base"><DollarSign className="h-4 w-4 text-primary" /> Deduction Review</CardTitle>
                 <p className="mt-0.5 text-xs text-muted-foreground">Benefit deductions from elections, rates, and contribution rules — reviewed before each payroll export.</p>
               </div>
-              {!readOnly && <Button size="sm">Export Ready Deductions</Button>}
+              {!readOnly && (
+                <Button size="sm" disabled={exportReady.isPending} onClick={() => exportReady.mutate({ planYearId })}>
+                  {exportReady.isPending ? "Exporting…" : "Export Ready Deductions"}
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -136,7 +149,13 @@ export function DeductionsPage() {
                       <TableCell className="text-right text-sm tabular-nums text-muted-foreground">{d.er}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{d.changeType}</TableCell>
                       <TableCell><StatusPill label={d.status} tone={dedTone[d.status]} /></TableCell>
-                      <TableCell className="text-right"><Button size="sm" variant="outline" className="h-8">{dedAction(d.status)}</Button></TableCell>
+                      <TableCell className="text-right">
+                        {!readOnly && !d.code ? (
+                          <MapCodeInline employerId={employerId} deductionId={d.id} />
+                        ) : (
+                          <Button size="sm" variant="outline" className="h-8">{dedAction(d.status)}</Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -196,7 +215,16 @@ export function DeductionsPage() {
                     <TableCell><StatusPill label={b.status} tone={batchTone[b.status]} /></TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{b.file}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{b.issues}</TableCell>
-                    <TableCell className="text-right"><Button size="sm" variant="ghost" className="h-8 text-primary">{b.status === "Ready" ? "Export" : "View"}</Button></TableCell>
+                    <TableCell className="text-right">
+                      {!readOnly && b.status === "Exported" ? (
+                        <Button size="sm" variant="ghost" className="h-8 text-primary" disabled={reconcile.isPending}
+                          onClick={() => reconcile.mutate({ batchId: b.id })}>
+                          {reconcile.isPending ? "Reconciling…" : "Reconcile"}
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" className="h-8 text-primary">View</Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -205,5 +233,27 @@ export function DeductionsPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+
+// Inline payroll-code assignment for rows missing one (Phase E-2c). Mock mode no-ops.
+function MapCodeInline({ employerId, deductionId }: { employerId: string; deductionId: string }) {
+  const [code, setCode] = useState("");
+  const m = useMapDeductionCode(employerId);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {m.error && <span className="text-[11px] text-destructive">{m.error.message}</span>}
+      <input
+        className="h-8 w-24 rounded-md border border-input bg-background px-2 font-mono text-xs"
+        placeholder="Code"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+      <Button size="sm" variant="outline" className="h-8" disabled={m.isPending || !code.trim()}
+        onClick={() => m.mutate({ deductionId, code: code.trim() })}>
+        {m.isPending ? "Saving…" : "Map Code"}
+      </Button>
+    </span>
   );
 }

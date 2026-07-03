@@ -105,6 +105,8 @@ export type CreateEnrollmentWindowArgs = { employerId: string; planYearId: strin
 export type ElectionActionArgs = { employerId: string; planYearId: string; electionId: string };
 export type SendBackElectionArgs = ElectionActionArgs & { note?: string };
 export type ElectionFlagArgs = { employerId: string; electionId: string };
+export type MapDeductionCodeArgs = { employerId: string; deductionId: string; code: string };
+export type ReconcileBatchArgs = { employerId: string; batchId: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -291,6 +293,27 @@ const APPROVE_ALL_READY = `mutation ApproveAllReadyElections($employerId: ID!, $
   approveAllReadyElections(employerId: $employerId, planYearId: $planYearId) ${ACTION_RESULT_FIELDS}
 }`;
 
+// Deductions workspace (Phase E-2b).
+const DEDUCTION_ROW_FIELDS = `{ id employee plan tier effective payrollGroup code ee er changeType status issue }`;
+const DEDUCTIONS_WORKSPACE = `query DeductionsWorkspace($employerId: ID!, $planYearId: ID!) {
+  deductionsWorkspace(employerId: $employerId, planYearId: $planYearId) {
+    readOnly
+    deductionSummary { readyToExport needsReview missingCode amountChanged effectiveThisPeriod totalEe totalEr }
+    deductionReview ${DEDUCTION_ROW_FIELDS}
+    deductionChanges { id employee changeType previous new effective status }
+    exportBatches { id batchDate payPeriod employees totalEe totalEr status file issues }
+  }
+}`;
+const MAP_DEDUCTION_CODE = `mutation MapDeductionCode($employerId: ID!, $deductionId: ID!, $code: String!) {
+  mapDeductionCode(employerId: $employerId, deductionId: $deductionId, code: $code) ${DEDUCTION_ROW_FIELDS}
+}`;
+const EXPORT_READY_DEDUCTIONS = `mutation ExportReadyDeductions($employerId: ID!, $planYearId: ID!) {
+  exportReadyDeductions(employerId: $employerId, planYearId: $planYearId) { jobId status }
+}`;
+const RECONCILE_BATCH = `mutation ReconcileBatch($employerId: ID!, $batchId: ID!) {
+  reconcileBatch(employerId: $employerId, batchId: $batchId) { id status }
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -332,6 +355,10 @@ export const operations = {
   requestEoi: { name: "requestEoi", kind: "mutation", document: REQUEST_EOI, buildVariables: (a: ElectionFlagArgs) => ({ employerId: a.employerId, electionId: a.electionId }) } as C1Operation<ElectionFlagArgs, unknown>,
   requestDependentDocs: { name: "requestDependentDocs", kind: "mutation", document: REQUEST_DEPENDENT_DOCS, buildVariables: (a: ElectionFlagArgs) => ({ employerId: a.employerId, electionId: a.electionId }) } as C1Operation<ElectionFlagArgs, unknown>,
   approveAllReadyElections: { name: "approveAllReadyElections", kind: "mutation", document: APPROVE_ALL_READY, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  deductionsWorkspace: { name: "deductionsWorkspace", kind: "query", document: DEDUCTIONS_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  mapDeductionCode: { name: "mapDeductionCode", kind: "mutation", document: MAP_DEDUCTION_CODE, buildVariables: (a: MapDeductionCodeArgs) => ({ employerId: a.employerId, deductionId: a.deductionId, code: a.code }) } as C1Operation<MapDeductionCodeArgs, unknown>,
+  exportReadyDeductions: { name: "exportReadyDeductions", kind: "mutation", document: EXPORT_READY_DEDUCTIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  reconcileBatch: { name: "reconcileBatch", kind: "mutation", document: RECONCILE_BATCH, buildVariables: (a: ReconcileBatchArgs) => ({ employerId: a.employerId, batchId: a.batchId }) } as C1Operation<ReconcileBatchArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

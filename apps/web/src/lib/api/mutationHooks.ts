@@ -345,3 +345,48 @@ export function useRequestDependentDocs(employerId: string) {
 export function useApproveAllReadyElections(employerId: string) {
   return useElectionMutation<{ planYearId: string }>(employerId, "approveAllReadyElections", (a) => a);
 }
+
+// --- Deductions workspace mutations (Phase E-2b) ----------------------------------
+const DEDUCTIONS_READS = ["deductionsWorkspace", "employerOverview", "planYearSetup"];
+
+export function useMapDeductionCode(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { deductionId: string; code: string }>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("mapDeductionCode", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.mapDeductionCode, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(DEDUCTIONS_READS);
+    },
+  });
+}
+
+export function useExportReadyDeductions(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string }>({
+    mutationFn: async ({ planYearId }) => {
+      if (resolveDataSource("exportReadyDeductions", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.exportReadyDeductions, { employerId, planYearId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(DEDUCTIONS_READS);
+    },
+  });
+}
+
+export function useReconcileBatch(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { batchId: string }>({
+    mutationFn: async ({ batchId }) => {
+      if (resolveDataSource("reconcileBatch", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.reconcileBatch, { employerId, batchId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(DEDUCTIONS_READS);
+    },
+  });
+}
