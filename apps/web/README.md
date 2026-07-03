@@ -39,3 +39,49 @@ src/
   (`../../docs/FRONTEND_DESIGN_PLAN.md`).
 - The broad GraphQL renames (`customerId`→`employerId`, `id` vs `<entity>Id`) are
   pending (`../../docs/IMPLEMENTATION_STATUS.md`); bind field names after that lands.
+
+## GraphQL client groundwork (C2-FE-FOUNDATION-1)
+
+The GraphQL transport now exists as **groundwork** in `src/lib/api/`:
+`config.ts` (env config), `client.ts` (typed request + error mapping), and
+`operations.ts` (the 14 Phase C **C1** operations). **Mock mode remains the default —
+no screen calls the live API yet.** The existing `use*` hooks still read the mock
+getters, so the app runs locally with **no backend endpoint required**.
+
+### Configure the GraphQL endpoint later (env only — never hardcoded)
+Vite build-time env (e.g. `apps/web/.env.local`):
+
+```
+VITE_GRAPHQL_ENDPOINT=https://<appsync-id>.appsync-api.<region>.amazonaws.com/graphql
+VITE_USE_LIVE_API=true
+```
+
+`isLiveApiEnabled()` returns true **only** when `VITE_USE_LIVE_API=true` **and**
+`VITE_GRAPHQL_ENDPOINT` is set. If either is missing, the app stays in mock mode — a
+missing/typo'd endpoint can never silently break screens. `createGraphQLClient()` with
+no endpoint throws `NotConfigured` instead of making a request.
+
+### Auth token provider
+AppSync uses Cognito user-pool auth: send a **Cognito ID token** in the `Authorization`
+header. The client takes a token provider; register it once when auth lands:
+
+```ts
+import { setAuthTokenProvider } from "@/lib/api";
+setAuthTokenProvider(async () => await getCognitoIdToken()); // returns the ID token, or null
+```
+
+The default provider returns `null` (no header). Per-request the client calls the
+provider, so token refresh is handled by the provider.
+
+### Error handling
+`client.request(...)` rejects with a `GraphQLClientError` whose `type` is one of
+`Unauthorized` | `ValidationError` | `GraphQL` | `Network` | `NotConfigured` — mapped
+from the backend's `errorType` (see `api/resolvers/src/handler.ts`). Screens can branch
+on `type` (e.g. show a permission message for `Unauthorized`, field errors for
+`ValidationError`).
+
+### Remains before the C2 hook swap
+Mock stays default until the backend is deployed and smoke-tested. The swap is then:
+in each hook, when `isLiveApiEnabled()`, point the `queryFn`/`mutationFn` at
+`runOperation(graphqlClient, operations.<name>, args)` instead of the mock getter —
+query keys and component code stay the same.
