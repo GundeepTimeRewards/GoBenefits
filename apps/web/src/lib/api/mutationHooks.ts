@@ -13,6 +13,8 @@ import {
   type UpdateEmployeeInput,
   type CreateDependentInput,
   type UpdateDependentInput,
+  type CreatePlanYearArgs,
+  type CopyFromPriorYearArgs,
 } from "./operations";
 
 export type MutationErrorType = "validation" | "unauthorized" | "error";
@@ -125,6 +127,68 @@ export function useRemoveDependent(employerId: string) {
     },
     onSuccess: (res) => {
       if (res.live) return invalidate(DEPENDENT_READS);
+    },
+  });
+}
+
+// --- Plan-year lifecycle mutations (Phase D-5) --------------------------------
+// Invalidate every read whose payload shows plan-year identity/status/plan counts:
+// the plan-year list + top-bar default, the employer detail (currentPlanYearId),
+// and the plan-year-scoped aggregates (overview, setup checklist, catalog).
+const PLAN_YEAR_READS = ["planYears", "currentPlanYear", "employer", "employerOverview", "planYearSetup", "planCatalog"];
+
+export function useCreatePlanYear(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, Omit<CreatePlanYearArgs, "employerId">>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("createPlanYear", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.createPlanYear, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_YEAR_READS);
+    },
+  });
+}
+
+export function useCopyFromPriorYear(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, Omit<CopyFromPriorYearArgs, "employerId">>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("copyFromPriorYear", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.copyFromPriorYear, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_YEAR_READS);
+    },
+  });
+}
+
+export function useActivatePlanYear(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string }>({
+    mutationFn: async ({ planYearId }) => {
+      if (resolveDataSource("activatePlanYear", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.activatePlanYear, { employerId, planYearId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_YEAR_READS);
+    },
+  });
+}
+
+export function useArchivePlanYear(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string }>({
+    mutationFn: async ({ planYearId }) => {
+      if (resolveDataSource("archivePlanYear", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.archivePlanYear, { employerId, planYearId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_YEAR_READS);
     },
   });
 }
