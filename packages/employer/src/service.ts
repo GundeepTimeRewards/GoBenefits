@@ -24,6 +24,7 @@ import * as enrollMutRepo from "./enrollment-mutation-repository.js";
 import * as reviewRepo from "./election-review-repository.js";
 import * as deductionRepo from "./deduction-repository.js";
 import * as lifeEventRepo from "./life-event-repository.js";
+import * as docRepo from "./document-repository.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -712,6 +713,184 @@ export async function reportLifeEvent(
   });
   const rows = await lifeEventRepo.listCasesForEmployee(db, employeeId);
   return toEmployeeEvent(rows.find((r) => r.id === id)!);
+}
+
+export type DocumentView = {
+  documentId: string;
+  name: string;
+  category: string;
+  type: string | null;
+  coverage: string | null;
+  carrier: string | null;
+  relatedTo: string | null;
+  requiredFor: string | null;
+  status: string;
+  expiresAt: string | null;
+  uploadedAt: string | null;
+  uploadedBy: string | null;
+  planYearId: string | null;
+  employerId: string | null;
+};
+
+export type DocumentWorkspace = {
+  employerId: string;
+  planYearId: string;
+  readOnly: boolean;
+  readinessPercent: number;
+  missingCount: number;
+  employeeActionCount: number;
+  expiringSoonCount: number;
+  issues: { key: string; label: string; count: number; tone: string }[];
+  tasks: { key: string; label: string; related: string; priority: string; area: string }[];
+  categories: { title: string; total: number; sub: string }[];
+  documents: DocumentView[];
+};
+
+function toDocumentView(employerId: string, planYearId: string, d: docRepo.DocumentRow): DocumentView {
+  return {
+    documentId: d.id,
+    name: d.name,
+    category: d.category,
+    type: null,
+    coverage: null,
+    carrier: null,
+    relatedTo: d.planName ?? d.employeeName,
+    requiredFor: d.planName ? "Plan documents" : d.category === "confirmation" ? "Employee confirmation" : null,
+    status: d.status,
+    expiresAt: null, // no expiry source yet — expiringSoonCount stays 0 until one exists
+    uploadedAt: d.uploadedAt,
+    uploadedBy: null,
+    planYearId,
+    employerId,
+  };
+}
+
+/**
+ * Documents workspace (Phase E-3) — the Documents & Forms read model. Authorizes on
+ * `documents.read`. Readiness = plans with at least one linked plan document (the
+ * SAME document_link signal the Plans & Rates catalog derives documentStatus from,
+ * so the two screens can never disagree).
+ */
+export async function documentWorkspace(ctx: AuthContext, employerId: string, planYearId: string): Promise<DocumentWorkspace> {
+  const { db } = await getCustomerDb(ctx, "documents.read", employerId);
+  const [pyStatus, docs, coverage, pendingSignatures] = await Promise.all([
+    planYearStatusOf(db, planYearId),
+    docRepo.listDocuments(db, planYearId),
+    docRepo.planDocCoverage(db, planYearId),
+    docRepo.pendingSignatureCount(db, planYearId),
+  ]);
+  const missingPlans = coverage.filter((p) => p.docCount === 0);
+  const readinessPercent = coverage.length === 0 ? 100 : Math.round((100 * (coverage.length - missingPlans.length)) / coverage.length);
+  const byCategory = new Map<string, number>();
+  for (const d of docs) byCategory.set(d.category, (byCategory.get(d.category) ?? 0) + 1);
+
+  const issues = [
+    { key: "missing_plan_docs", label: "Plans missing documents / SBCs", count: missingPlans.length, tone: "danger" },
+    { key: "pending_signatures", label: "Signatures awaiting employees", count: pendingSignatures, tone: "warning" },
+    { key: "archived_legacy", label: "Legacy archive documents", count: docs.filter((d) => d.legacy).length, tone: "info" },
+  ].filter((i) => i.count > 0);
+  const tasks = [
+    ...missingPlans.map((p) => ({
+      key: `plan_docs_${p.planId}`,
+      label: "Upload plan documents / SBC",
+      related: p.planName,
+      priority: "high",
+      area: "Plan Setup",
+    })),
+    ...(pendingSignatures > 0
+      ? [{ key: "chase_signatures", label: "Follow up on pending signatures", related: `${pendingSignatures} request(s)`, priority: "medium", area: "Employees" }]
+      : []),
+  ];
+
+  return {
+    employerId,
+    planYearId,
+    readOnly: pyStatus === "archived",
+    readinessPercent,
+    missingCount: missingPlans.length,
+    employeeActionCount: pendingSignatures,
+    expiringSoonCount: 0,
+    issues,
+    tasks,
+    categories: [...byCategory.entries()].map(([title, total]) => ({ title, total, sub: `${total} document(s)` })),
+    documents: docs.map((d) => toDocumentView(employerId, planYearId, d)),
+  };
+}
+
+/**
+ * Record a document (Phase E-3, metadata-first). `documents.manage`. The optional
+ * planId links the doc to a benefit plan in this plan year — the link that flips
+ * the catalog's documentStatus to complete.
+ */
+export async function uploadDocument(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  category: string,
+  name: string,
+  planId?: string | null
+): Promise<DocumentView> {
+  const { db } = await getCustomerDb(ctx, "documents.manage", employerId);
+  const trimmedName = name?.trim();
+  const trimmedCategory = category?.trim();
+  if (!trimmedName) throw new ValidationError("Document name is required");
+  if (!trimmedCategory) throw new ValidationError("Document category is required");
+  const pyStatus = await planMutRepo.planYearStatus(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  if (planId) {
+    const plan = await planMutRepo.getPlanMeta(db, planId);
+    if (!plan || plan.planYearId !== planYearId) {
+      throw new ValidationError("planId must be a plan in this plan year");
+    }
+  }
+  const id = await docRepo.insertDocument(db, {
+    name: trimmedName,
+    category: trimmedCategory,
+    uploadedBy: ctx.user.id,
+    planYearId,
+    planId: planId ?? null,
+  });
+  return toDocumentView(employerId, planYearId, (await docRepo.getDocument(db, id))!);
+}
+
+/** Request a signature on a document (Phase E-3). `documents.manage`. */
+export async function requestSignature(ctx: AuthContext, employerId: string, documentId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "documents.manage", employerId);
+  const doc = await docRepo.getDocument(db, documentId);
+  if (!doc) throw new ValidationError("Document not found for this employer");
+  if (doc.status === "Signature Pending") throw new ValidationError("A signature request is already open for this document");
+  await docRepo.insertSignatureRequest(db, documentId, null);
+  return { ok: true, message: `Signature requested for "${doc.name}"`, id: documentId };
+}
+
+/**
+ * Generate enrollment confirmation statements (Phase E-3). `documents.manage`.
+ * One confirmation document + signature request per APPROVED-election employee,
+ * idempotent (employees who already have one are skipped). Metadata-first: the
+ * confirmation PDF itself renders in the prod pipeline against the reserved key.
+ */
+export async function generateConfirmations(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string
+): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "documents.manage", employerId);
+  const pyStatus = await planMutRepo.planYearStatus(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  const employees = await docRepo.employeesNeedingConfirmations(db, planYearId);
+  for (const e of employees) {
+    const docId = await docRepo.insertDocument(db, {
+      name: `Enrollment Confirmation — ${e.name}.pdf`,
+      category: "confirmation",
+      uploadedBy: ctx.user.id,
+      planYearId,
+      employeeId: e.employeeId,
+    });
+    await docRepo.insertSignatureRequest(db, docId, e.employeeId);
+  }
+  return { jobId: randomUUID(), status: `completed: ${employees.length} confirmation(s) generated` };
 }
 
 /** Age in whole years at a date (nulls → null: composite rates only). */
