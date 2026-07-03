@@ -5,7 +5,7 @@
  * user, unauthorized/unknown/archived employer, or a missing permission fails closed
  * inside getCustomerDb — never in the repository.
  */
-import { getCustomerDb, controlPlanePool, AuthError, type AuthContext } from "@goben/data-access";
+import { getCustomerDb, controlPlanePool, getBoundEmployerId, AuthError, type AuthContext } from "@goben/data-access";
 import * as repo from "./plan-year-repository.js";
 import * as setupRepo from "./plan-year-setup-repository.js";
 import * as catalogRepo from "./plan-catalog-repository.js";
@@ -23,6 +23,15 @@ import * as planMutRepo from "./plan-mutation-repository.js";
 import * as enrollMutRepo from "./enrollment-mutation-repository.js";
 import * as reviewRepo from "./election-review-repository.js";
 import * as deductionRepo from "./deduction-repository.js";
+import * as lifeEventRepo from "./life-event-repository.js";
+import {
+  buildLifeEventQueue,
+  toCaseView,
+  toEmployeeEvent,
+  type LifeEventQueue,
+  type LifeEventCaseView,
+  type EmployeeLifeEventView,
+} from "./life-events.js";
 import {
   deriveDeductionRow,
   deriveChanges,
@@ -577,6 +586,132 @@ export async function reconcileBatch(ctx: AuthContext, employerId: string, batch
   await deductionRepo.approveBatch(db, batchId);
   const batches = await deductionRepo.listExportBatches(db, batch.planYearId ?? "");
   return toBatchView(batches.find((b) => b.id === batchId)!);
+}
+
+/**
+ * Life-events HR work queue (Phase E-4). Same two-permission gate as the election
+ * queue: `life_event.read` plus `employee.read` (employees hold life_event.read
+ * for their OWN events — the queue exposes everyone's, so it needs the
+ * employee-LIST permission the seed withholds from the employee role).
+ */
+export async function lifeEventQueue(ctx: AuthContext, employerId: string, planYearId: string): Promise<LifeEventQueue> {
+  const { db } = await getCustomerDb(ctx, "life_event.read", employerId);
+  if (!ctx.permissions.has("employee.read")) {
+    throw new AuthError("Missing permission: employee.read (the life-event queue is an HR/broker surface)");
+  }
+  const [pyStatus, rows] = await Promise.all([planYearStatusOf(db, planYearId), lifeEventRepo.listCases(db)]);
+  return buildLifeEventQueue(employerId, planYearId, pyStatus, rows);
+}
+
+/** Shared guard for the HR case mutations (manage + LIST permission + case exists). */
+async function hrCase(ctx: AuthContext, db: import("mysql2/promise").Pool, caseId: string) {
+  if (!ctx.permissions.has("employee.read")) {
+    throw new AuthError("Missing permission: employee.read (life-event decisions are an HR surface)");
+  }
+  const c = await lifeEventRepo.getCase(db, caseId);
+  if (!c) throw new ValidationError("Life event case not found for this employer");
+  return c;
+}
+
+const REVIEWABLE = new Set(["submitted", "under_review", "needs_documents"]);
+
+/** Approve a life event (Phase E-4). `life_event.manage`; records the decision trail. */
+export async function approveLifeEvent(ctx: AuthContext, employerId: string, caseId: string): Promise<LifeEventCaseView> {
+  const { db } = await getCustomerDb(ctx, "life_event.manage", employerId);
+  const c = await hrCase(ctx, db, caseId);
+  if (!REVIEWABLE.has(c.status)) throw new ValidationError("Only submitted / in-review cases can be approved");
+  await lifeEventRepo.decideCase(db, { caseId, status: "approved", decision: "approved", decidedBy: ctx.user.id, notes: null });
+  return toCaseView((await lifeEventRepo.getCase(db, caseId))!);
+}
+
+/** Deny a life event (Phase E-4) with an optional reason (kept on the approval trail). */
+export async function denyLifeEvent(ctx: AuthContext, employerId: string, caseId: string, reason?: string | null): Promise<LifeEventCaseView> {
+  const { db } = await getCustomerDb(ctx, "life_event.manage", employerId);
+  const c = await hrCase(ctx, db, caseId);
+  if (!REVIEWABLE.has(c.status)) throw new ValidationError("Only submitted / in-review cases can be denied");
+  await lifeEventRepo.decideCase(db, { caseId, status: "rejected", decision: "rejected", decidedBy: ctx.user.id, notes: reason?.trim() || null });
+  return toCaseView((await lifeEventRepo.getCase(db, caseId))!);
+}
+
+/** Ask the employee for documents (Phase E-4): submitted/under_review → needs_documents. */
+export async function requestLifeEventDocs(ctx: AuthContext, employerId: string, caseId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "life_event.manage", employerId);
+  const c = await hrCase(ctx, db, caseId);
+  if (!["submitted", "under_review"].includes(c.status)) {
+    throw new ValidationError("Documents can only be requested on submitted / in-review cases");
+  }
+  await lifeEventRepo.setStatus(db, caseId, "needs_documents");
+  return { ok: true, message: "Documents requested from the employee", id: caseId };
+}
+
+/**
+ * Open the election window for an APPROVED life event (Phase E-4): creates a
+ * life_event enrollment event + a 30-day window on the ACTIVE plan year (QLE
+ * changes apply to current coverage) and stamps the case.
+ */
+export async function openElectionWindow(ctx: AuthContext, employerId: string, caseId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "life_event.manage", employerId);
+  const c = await hrCase(ctx, db, caseId);
+  if (c.status !== "approved") throw new ValidationError("Approve the life event before opening its election window");
+  const current = await repo.currentPlanYear(db);
+  if (!current) throw new ValidationError("No plan year to open an election window on");
+  const today = new Date().toISOString().slice(0, 10);
+  const end = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
+  await enrollMutRepo.createWindow(db, {
+    planYearId: current.id,
+    type: "life_event",
+    name: `${c.eventType} — ${c.employee}`,
+    effectiveDate: c.eventDate ?? today,
+    windowStart: today,
+    windowEnd: end,
+  });
+  await lifeEventRepo.setStatus(db, caseId, "election_window_open", `Open · closes ${end}`);
+  return { ok: true, message: `Election window open through ${end}`, id: caseId };
+}
+
+/**
+ * The calling employee's own life events (Phase E-4). Identity-scoped: employee
+ * role only, employer from the user's binding, employee row resolved by the
+ * account-email link (see findEmployeeByEmail). Fails closed when unlinked.
+ */
+export async function employeeLifeEvents(ctx: AuthContext): Promise<{ employeeId: string; events: EmployeeLifeEventView[] }> {
+  if (ctx.user.roleKey !== "employee") {
+    throw new AuthError("employeeLifeEvents is the employee self-service read — admins use lifeEventQueue");
+  }
+  const employerId = await getBoundEmployerId(ctx.user);
+  if (!employerId) throw new AuthError("Your account is not bound to an employer");
+  const { db } = await getCustomerDb(ctx, "life_event.read", employerId);
+  const employeeId = await lifeEventRepo.findEmployeeByEmail(db, ctx.user.email);
+  if (!employeeId) throw new AuthError("Your account is not linked to an employee record");
+  const rows = await lifeEventRepo.listCasesForEmployee(db, employeeId);
+  return { employeeId, events: rows.map(toEmployeeEvent) };
+}
+
+/** Report a life event (Phase E-4, employee self): creates a submitted case. */
+export async function reportLifeEvent(
+  ctx: AuthContext,
+  input: { eventType: string; eventDate: string; notes?: string | null }
+): Promise<EmployeeLifeEventView> {
+  if (ctx.user.roleKey !== "employee") {
+    throw new AuthError("reportLifeEvent is the employee self-service write");
+  }
+  const employerId = await getBoundEmployerId(ctx.user);
+  if (!employerId) throw new AuthError("Your account is not bound to an employer");
+  const { db } = await getCustomerDb(ctx, "life_event.manage", employerId);
+  const employeeId = await lifeEventRepo.findEmployeeByEmail(db, ctx.user.email);
+  if (!employeeId) throw new AuthError("Your account is not linked to an employee record");
+  if (!ISO_DATE.test(input.eventDate ?? "")) throw new ValidationError("eventDate must be YYYY-MM-DD");
+  const type = await lifeEventRepo.findEventType(db, input.eventType);
+  if (!type) throw new ValidationError(`Unknown life event type: ${input.eventType}`);
+  const id = await lifeEventRepo.insertLifeEvent(db, {
+    employeeId,
+    typeId: type.id,
+    eventDate: input.eventDate,
+    notes: input.notes?.trim() || null,
+    documentationRequired: type.documentationRequired,
+  });
+  const rows = await lifeEventRepo.listCasesForEmployee(db, employeeId);
+  return toEmployeeEvent(rows.find((r) => r.id === id)!);
 }
 
 /** Age in whole years at a date (nulls → null: composite rates only). */
