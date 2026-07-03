@@ -21,11 +21,15 @@
     "test:employer": "bun test packages/employer/test/employer.test.ts",
     "setup:local": "bun local/setup.ts",
     "verify:local": "bun local/setup.ts && bun test",
+    "dev:graphql": "bun local/dev-graphql.ts",
+    "smoke:c1": "bun local/c1-smoke.ts",
     "lint": "eslint ."
   },
   "devDependencies": {
+    "@graphql-tools/schema": "^10.0.34",
     "@types/node": "^22.16.5",
     "graphql": "^17.0.1",
+    "graphql-yoga": "^5.21.2",
     "typescript": "^5.8.3"
   }
 }
