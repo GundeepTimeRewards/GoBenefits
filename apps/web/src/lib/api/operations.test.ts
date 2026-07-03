@@ -4,10 +4,10 @@ import { operations, C1_OPERATION_NAMES, runOperation } from "./operations";
 import type { GraphQLClient } from "./client";
 
 describe("C1 operation registry", () => {
-  test("exposes the C1 operations + Phase D-1/D-2/D-3/D-3b read fields", () => {
-    expect(C1_OPERATION_NAMES.length).toBe(19);
+  test("exposes the C1 operations + Phase D-1/D-2/D-3/D-3b/D-4 read fields", () => {
+    expect(C1_OPERATION_NAMES.length).toBe(20);
     for (const name of [
-      "me", "myEmployers", "employer", "planYears", "currentPlanYear", "planYearSetupStatus",
+      "me", "myEmployers", "employer", "employerOverview", "planYears", "currentPlanYear", "planYearSetupStatus",
       "planCatalog", "benefitPlanDetail", "enrollmentProgress", "enrollmentCenter", "employerCensusContext",
       "employees", "employeeDetail", "dependents",
       "createEmployee", "updateEmployee", "addDependent", "updateDependent", "removeDependent",
@@ -16,9 +16,9 @@ describe("C1 operation registry", () => {
     }
   });
 
-  test("kinds are correct (14 queries, 5 mutations)", () => {
+  test("kinds are correct (15 queries, 5 mutations)", () => {
     const kinds = C1_OPERATION_NAMES.map((n) => operations[n].kind);
-    expect(kinds.filter((k) => k === "query").length).toBe(14);
+    expect(kinds.filter((k) => k === "query").length).toBe(15);
     expect(kinds.filter((k) => k === "mutation").length).toBe(5);
   });
 

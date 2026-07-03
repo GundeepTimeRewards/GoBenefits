@@ -9,7 +9,7 @@ import { useRole } from "@/lib/role-context";
 import { getPersonaNav } from "@/lib/persona";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear } from "@/lib/plan-year-context";
-import { useEmployer, useEnrollmentProgress, useOpenEnrollmentDashboard } from "@/lib/api";
+import { useEmployer, useEnrollmentProgress, useOpenEnrollmentDashboard, useEmployerOverviewRollup } from "@/lib/api";
 import { dashboardKpis, dashboardActivity, dashboardAttention } from "@/lib/app-mock";
 import type { OeAttention, PlanYearRow } from "@/lib/mock/db";
 
@@ -50,6 +50,43 @@ function PortfolioDashboard() {
 }
 
 // Company dashboard for Employer Admin — reacts to the active PLAN YEAR.
+// D-4: compact live rollup card driven by the `employerOverview` aggregate. Additive —
+// it renders alongside the existing status-specific KPI rows without replacing them.
+function OverviewRollupCard({ employerId, planYearId }: { employerId: string; planYearId: string }) {
+  const { data: o } = useEmployerOverviewRollup(employerId, planYearId);
+  if (!o) return null;
+  const sevTone = (s: string): "danger" | "warning" | "info" => (s === "high" ? "danger" : s === "medium" ? "warning" : "info");
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Plan Year Overview · {o.planYearLabel || "—"}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <KpiRow items={[
+          { label: "Eligible Employees", value: o.eligibleEmployees, icon: Users },
+          { label: "Enrolled", value: o.enrolled, tone: "text-success", icon: ClipboardCheck, iconClass: "bg-success/10 text-success" },
+          { label: "Waived", value: o.waived, icon: BarChart3 },
+          { label: "Benefit Plans", value: o.benefitPlans, icon: ShieldCheck },
+          { label: "Setup Readiness", value: `${o.setupReadinessPct}%`, tone: "text-info", icon: ClipboardCheck, iconClass: "bg-info/10 text-info" },
+          { label: "Enrollment", value: `${o.enrollmentPct}%`, tone: "text-info", icon: BarChart3, iconClass: "bg-info/10 text-info" },
+          { label: "Launch Blockers", value: o.launchBlockers, tone: o.launchBlockers ? "text-warning" : "", icon: AlertTriangle, iconClass: "bg-warning/15 text-warning" },
+        ]} />
+        {o.needsAttention.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">Needs attention</div>
+            {o.needsAttention.map((a) => (
+              <div key={a.key} className="flex items-center justify-between gap-3 rounded-md border border-border/60 p-3">
+                <span className="text-sm">{a.title}</span>
+                <StatusPill label={a.severity === "high" ? "High" : a.severity === "medium" ? "Review" : "Info"} tone={sevTone(a.severity)} />
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CompanyDashboard() {
   const employerId = useActiveEmployerId();
   const { data: employer } = useEmployer(employerId);
@@ -65,6 +102,10 @@ function CompanyDashboard() {
   return (
     <div className="mx-auto max-w-[1200px] space-y-6">
       <PageHeader title="Company Dashboard" subtitle={`${employer.name} · ${py.label} · ${statusLabel}`} />
+
+      {/* D-4: additive live rollup card (employerOverview aggregate). Live only for live-UUID
+          ids; composed from mock getters otherwise. Existing cards below are unchanged. */}
+      <OverviewRollupCard employerId={employerId} planYearId={py.id} />
 
       {py.status === "Archived" && (
         <Banner tone="info"><Archive className="h-4 w-4 shrink-0" /> This plan year is archived — read-only summary.</Banner>

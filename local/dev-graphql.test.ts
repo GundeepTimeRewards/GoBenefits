@@ -73,6 +73,28 @@ describe("createDevSchema dispatch", () => {
     expect(calls[0].identity.sub).toBe("sub-emp-admin-a");
   });
 
+  test("dispatches employerOverview (Phase D-4)", async () => {
+    const calls: any[] = [];
+    const fake: ResolverHandler = async (event) => {
+      calls.push(event);
+      return { employerId: "e", planYearId: "py", planYearLabel: "PY 2026", planYearStatus: "active",
+        eligibleEmployees: 4, enrolled: 2, waived: 1, benefitPlans: 2, setupReadinessPct: 53, enrollmentPct: 50, launchBlockers: 0,
+        needsAttention: [] };
+    };
+    const schema = createDevSchema(fake);
+    const result = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!){ employerOverview(employerId: $e, planYearId: $py) { planYearLabel eligibleEmployees enrolled benefitPlans setupReadinessPct needsAttention { key } } }`,
+      variableValues: { e: "e", py: "py" }, contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(result.errors).toBeUndefined();
+    const d = (result.data as any).employerOverview;
+    expect(d.planYearLabel).toBe("PY 2026");
+    expect(d.enrolled).toBe(2);
+    expect(calls[0].info.fieldName).toBe("employerOverview");
+    expect(calls[0].arguments).toMatchObject({ employerId: "e", planYearId: "py" });
+  });
+
   test("dispatches planCatalog + benefitPlanDetail (Phase D-2)", async () => {
     const calls: any[] = [];
     const fake: ResolverHandler = async (event) => {

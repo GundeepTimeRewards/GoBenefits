@@ -100,6 +100,14 @@ const PLAN_YEAR_SETUP_STATUS = `query PlanYearSetupStatus($employerId: ID!, $pla
   }
 }`;
 
+const EMPLOYER_OVERVIEW = `query EmployerOverview($employerId: ID!, $planYearId: ID!) {
+  employerOverview(employerId: $employerId, planYearId: $planYearId) {
+    employerId planYearId planYearLabel planYearStatus
+    eligibleEmployees enrolled waived benefitPlans setupReadinessPct enrollmentPct launchBlockers
+    needsAttention { key title severity route }
+  }
+}`;
+
 const PLAN_CATALOG = `query PlanCatalog($employerId: ID!, $planYearId: ID!) {
   planCatalog(employerId: $employerId, planYearId: $planYearId) {
     employerId planYearId readOnly
@@ -191,6 +199,7 @@ export const operations = {
   planYears: { name: "planYears", kind: "query", document: PLAN_YEARS, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   currentPlanYear: { name: "currentPlanYear", kind: "query", document: CURRENT_PLAN_YEAR, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   planYearSetupStatus: { name: "planYearSetupStatus", kind: "query", document: PLAN_YEAR_SETUP_STATUS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  employerOverview: { name: "employerOverview", kind: "query", document: EMPLOYER_OVERVIEW, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   planCatalog: { name: "planCatalog", kind: "query", document: PLAN_CATALOG, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   benefitPlanDetail: { name: "benefitPlanDetail", kind: "query", document: BENEFIT_PLAN_DETAIL, buildVariables: (a: PlanDetailArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, planId: a.planId }) } as C1Operation<PlanDetailArgs, unknown>,
   enrollmentProgress: { name: "enrollmentProgress", kind: "query", document: ENROLLMENT_PROGRESS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,

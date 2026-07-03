@@ -83,6 +83,38 @@ export function mapPlanYear(p: LivePlanYear): PlanYearRow {
   };
 }
 
+// --- Employer Overview rollup (Phase D-4) ------------------------------------
+// GraphQL `EmployerOverview` (compact dashboard KPIs) → the view the additive
+// CompanyDashboard card renders. planYearStatus is display-cased via mapPlanYearStatus;
+// nullable Int fields default to 0; needsAttention passes through.
+export type LiveAttentionItem = { key: string; title: string; severity: string; route: string | null };
+export type LiveEmployerOverview = {
+  employerId: string; planYearId: string; planYearLabel: string; planYearStatus: string;
+  eligibleEmployees: number; enrolled: number | null; waived: number | null; benefitPlans: number | null;
+  setupReadinessPct: number | null; enrollmentPct: number | null; launchBlockers: number | null;
+  needsAttention: LiveAttentionItem[];
+};
+export type EmployerOverviewRollup = {
+  planYearLabel: string; planYearStatus: string; eligibleEmployees: number;
+  enrolled: number; waived: number; benefitPlans: number; setupReadinessPct: number;
+  enrollmentPct: number; launchBlockers: number; needsAttention: LiveAttentionItem[];
+};
+
+export function mapEmployerOverview(v: LiveEmployerOverview): EmployerOverviewRollup {
+  return {
+    planYearLabel: v.planYearLabel,
+    planYearStatus: mapPlanYearStatus(v.planYearStatus),
+    eligibleEmployees: v.eligibleEmployees,
+    enrolled: v.enrolled ?? 0,
+    waived: v.waived ?? 0,
+    benefitPlans: v.benefitPlans ?? 0,
+    setupReadinessPct: v.setupReadinessPct ?? 0,
+    enrollmentPct: v.enrollmentPct ?? 0,
+    launchBlockers: v.launchBlockers ?? 0,
+    needsAttention: v.needsAttention,
+  };
+}
+
 // --- Plan Year Setup checklist (Phase D-1) -----------------------------------
 // GraphQL `PlanYearSetupStatus` → the `PlanYearSetupView` the page renders. The one
 // remap is `key` → `stepKey`; server status values already match `ReadinessStatus`.
