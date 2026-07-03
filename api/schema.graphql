@@ -878,7 +878,13 @@ type Mutation {
   generate1095c(employerId: ID!, complianceYear: Int!): JobHandle
   sendToFilingPartner(employerId: ID!, complianceYear: Int!): JobHandle
   calculateAleStatus(employerId: ID!, complianceYear: Int!): JobHandle
+  ## (Phase F-1 — IMPLEMENTED; COBRA scope decision 2026-07-03: NO premium collection,
+  ## a TPA administers payments — recordCobraPayment returns an honest not-enabled
+  ## error and cobra_payment stays unused. createCobraEvent/recordCobraElection are
+  ## additive contract finalizations: HR records qualifying events + election outcomes.)
+  createCobraEvent(employerId: ID!, input: CreateCobraEventInput!): CobraEvent
   generateCobraNotice(employerId: ID!, cobraEventId: ID!): ActionResult
+  recordCobraElection(employerId: ID!, cobraEventId: ID!, elected: Boolean!, coverage: String): CobraEvent
   recordCobraPayment(employerId: ID!, cobraEventId: ID!, amount: Float!): CobraPayment
 }
 
@@ -891,6 +897,14 @@ input CreateEnrollmentWindowInput {
   windowStart: AWSDate!
   windowEnd: AWSDate!
   effectiveDate: AWSDate
+}
+
+## createCobraEvent payload (Phase F-1). eventType mirrors the cobra_event enum.
+input CreateCobraEventInput {
+  employeeId: ID!
+  eventType: String!
+  eventDate: AWSDate!
+  coverage: String
 }
 
 ## importPayrollData payload (Phase E-5): one pay period's rows. employeeNumber is
