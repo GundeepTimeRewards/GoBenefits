@@ -11,7 +11,7 @@ import { PageHeader, KpiRow, StatusPill, LoadingCard } from "@/components/common
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useRole } from "@/lib/role-context";
-import { useEmployer, useEnrollmentProgress, useLaunchReadiness, useEnrollmentWindows, useOngoingEnrollmentWork, useOpenEnrollmentSummary } from "@/lib/api";
+import { useEmployer, useEnrollmentProgress, useEnrollmentCenter } from "@/lib/api";
 import type { LaunchReadiness, PlanYearRow, OpenEnrollmentSummary, OngoingWorkItem, OngoingWorkUrgency } from "@/lib/mock/db";
 
 const WINDOW_TYPES = ["All", "Open Enrollment", "New Hire", "Life Event", "Special Enrollment"] as const;
@@ -47,15 +47,17 @@ export function EnrollmentEventsPage() {
   const planYearId = useActivePlanYearId();
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
-  const { data: oe } = useOpenEnrollmentSummary(employerId, planYearId);
-  const { data: readiness } = useLaunchReadiness(employerId, planYearId);
-  const { data: windows = [] } = useEnrollmentWindows(employerId, planYearId);
-  const { data: ongoing = [] } = useOngoingEnrollmentWork(employerId, planYearId);
+  // D-3b: one consolidated hook (live `enrollmentCenter` aggregate, or the 4 mock getters).
+  const { data: center } = useEnrollmentCenter(employerId, planYearId);
   const { role } = useRole();
   const [typeFilter, setTypeFilter] = useState<(typeof WINDOW_TYPES)[number]>("All");
   const [launched, setLaunched] = useState(false);
 
-  if (!employer || !py || !oe || !readiness) return <LoadingCard label="Loading enrollment center…" />;
+  if (!employer || !py || !center || !center.openEnrollmentSummary || !center.launchReadiness) return <LoadingCard label="Loading enrollment center…" />;
+  const oe = center.openEnrollmentSummary;
+  const readiness = center.launchReadiness;
+  const windows = center.windows;
+  const ongoing = center.ongoingWork;
 
   const brokerView = role === "broker" || role === "agency_admin";
   const blockers = brokerView ? readiness.blockers.filter((b) => !PAYROLL_AREAS.has(b.area)) : readiness.blockers;

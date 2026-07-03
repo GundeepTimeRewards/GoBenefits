@@ -7,6 +7,8 @@ import type {
   PlanCatalog, PlanCatalogRow, BenefitPlanDetail,
   PlanBenefitRow, PlanRateRow, PlanContribRow, PlanEligRow, PlanDocRow,
   EnrollmentSummary,
+  LaunchReadiness, OpenEnrollmentSummary, EnrollmentWindow, EnrollmentWindowType,
+  OngoingWorkItem, OngoingWorkUrgency, OngoingWorkRoute, ReadinessItem, ReadinessCheck,
 } from "@/lib/mock/db";
 import type { CensusEmployee, EmployerCensusContext, EmployeeDetail, Dependent } from "@/lib/census-mock";
 import type { ChecklistStep, ReadinessStatus, PlanYearSetupView } from "@/lib/plan-year-checklist-mock";
@@ -193,6 +195,81 @@ export function mapEnrollmentProgress(v: LiveEnrollmentProgress): EnrollmentSumm
     inProgress: v.inProgress,
     submitted: v.submitted,
     byCoverage: v.byCoverage,
+  };
+}
+
+// --- Enrollment Center (Phase D-3b) -----------------------------------------
+// GraphQL `EnrollmentCenter` → the four mock sub-shapes the command-center page consumes.
+// Normalizations: launchState passes through (same enum); planYearStatus is display-cased
+// via mapPlanYearStatus; ReadinessItem.severity is set per array (blockers→"blocker",
+// warnings→"warning") since the backend uses high/medium; nullable fields default to ""/0.
+export type LiveReadinessItem = { key: string; label: string; severity: string; area: string; description: string | null };
+export type LiveLaunchReadiness = {
+  planYearStatus: string; readinessPercent: number; canLaunch: boolean; launchState: string;
+  blockers: LiveReadinessItem[]; warnings: LiveReadinessItem[];
+  checklist: { key: string; label: string; status: string }[];
+};
+export type LiveEnrollmentWindow = {
+  id: string; name: string; type: string; windowLabel: string | null; effectiveRule: string | null;
+  employeesAffected: string | null; status: string; completion: number | null; nextAction: string | null;
+};
+export type LiveOngoingWorkItem = {
+  key: string; label: string; count: number; countLabel: string | null; status: string | null;
+  urgency: string | null; nextAction: string | null; route: string | null;
+};
+export type LiveEnrollmentCenter = {
+  employerId: string; planYearId: string; launchState: string;
+  launchReadiness: LiveLaunchReadiness | null;
+  openEnrollmentSummary: OpenEnrollmentSummary | null;
+  windows: LiveEnrollmentWindow[];
+  ongoingWork: LiveOngoingWorkItem[];
+};
+
+/** The four-part bundle the command-center page reads (mirrors the mock hook outputs). */
+export type EnrollmentCenterView = {
+  launchReadiness: LaunchReadiness | null;
+  openEnrollmentSummary: OpenEnrollmentSummary | null;
+  windows: EnrollmentWindow[];
+  ongoingWork: OngoingWorkItem[];
+};
+
+const mapReadinessItem = (i: LiveReadinessItem, severity: "blocker" | "warning"): ReadinessItem => ({
+  key: i.key, label: i.label, severity, area: i.area, description: i.description ?? "",
+});
+const mapReadinessCheck = (c: { key: string; label: string; status: string }): ReadinessCheck => ({
+  key: c.key, label: c.label, status: c.status as ReadinessCheck["status"],
+});
+
+function mapLaunchReadiness(r: LiveLaunchReadiness): LaunchReadiness {
+  return {
+    planYearStatus: mapPlanYearStatus(r.planYearStatus),
+    readinessPercent: r.readinessPercent,
+    blockers: r.blockers.map((b) => mapReadinessItem(b, "blocker")),
+    warnings: r.warnings.map((w) => mapReadinessItem(w, "warning")),
+    canLaunch: r.canLaunch,
+    launchState: r.launchState as LaunchReadiness["launchState"],
+    checklist: r.checklist.map(mapReadinessCheck),
+  };
+}
+
+const mapWindow = (w: LiveEnrollmentWindow): EnrollmentWindow => ({
+  id: w.id, name: w.name, type: w.type as EnrollmentWindowType, windowLabel: w.windowLabel ?? "",
+  effectiveRule: w.effectiveRule ?? "", employeesAffected: w.employeesAffected ?? "",
+  status: w.status, completion: w.completion ?? 0, nextAction: w.nextAction ?? "",
+});
+
+const mapOngoing = (o: LiveOngoingWorkItem): OngoingWorkItem => ({
+  key: o.key, label: o.label, count: o.count, countLabel: o.countLabel ?? "",
+  status: o.status ?? "", urgency: (o.urgency ?? "low") as OngoingWorkUrgency,
+  nextAction: o.nextAction ?? "", route: (o.route ?? "enrollment-events") as OngoingWorkRoute,
+});
+
+export function mapEnrollmentCenter(v: LiveEnrollmentCenter): EnrollmentCenterView {
+  return {
+    launchReadiness: v.launchReadiness ? mapLaunchReadiness(v.launchReadiness) : null,
+    openEnrollmentSummary: v.openEnrollmentSummary,
+    windows: v.windows.map(mapWindow),
+    ongoingWork: v.ongoingWork.map(mapOngoing),
   };
 }
 
