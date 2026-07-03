@@ -44,6 +44,35 @@ describe("createDevSchema dispatch", () => {
     expect(calls[0].identity.sub).toBe("sub-emp-admin-a"); // dev sub reached identity.sub
   });
 
+  test("dispatches planYearSetupStatus (Phase D-1) with the wrapped selection", async () => {
+    const calls: any[] = [];
+    const fake: ResolverHandler = async (event) => {
+      calls.push(event);
+      return {
+        employerId: event.arguments.employerId,
+        planYearId: event.arguments.planYearId,
+        completionPct: 13,
+        blockers: 0,
+        steps: [{ key: "census_imported", label: "Census", description: null, category: "People", requiredByDefault: true, status: "complete", route: "/census", message: null }],
+      };
+    };
+    const schema = createDevSchema(fake);
+    const result = await graphql({
+      schema,
+      source: `query($e: ID!, $py: ID!){ planYearSetupStatus(employerId: $e, planYearId: $py) { employerId planYearId completionPct blockers steps { key status requiredByDefault } } }`,
+      variableValues: { e: "emp-uuid", py: "py-uuid" },
+      contextValue: { devSub: "sub-emp-admin-a" },
+    });
+    expect(result.errors).toBeUndefined();
+    const data = (result.data as any).planYearSetupStatus;
+    expect(data.completionPct).toBe(13);
+    expect(data.blockers).toBe(0);
+    expect(data.steps[0].key).toBe("census_imported");
+    expect(calls[0].info.fieldName).toBe("planYearSetupStatus");
+    expect(calls[0].arguments).toMatchObject({ employerId: "emp-uuid", planYearId: "py-uuid" });
+    expect(calls[0].identity.sub).toBe("sub-emp-admin-a");
+  });
+
   test("dispatches a mutation field too", async () => {
     const calls: any[] = [];
     const fake: ResolverHandler = async (event) => {

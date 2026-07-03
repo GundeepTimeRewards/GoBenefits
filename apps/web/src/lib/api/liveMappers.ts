@@ -4,6 +4,7 @@
 // remapping. Fields with no C1 source get documented null/0 defaults.
 import type { EmployerProfile, PlanYearRow } from "@/lib/mock/db";
 import type { CensusEmployee, EmployerCensusContext, EmployeeDetail, Dependent } from "@/lib/census-mock";
+import type { ChecklistStep, ReadinessStatus, PlanYearSetupView } from "@/lib/plan-year-checklist-mock";
 
 // --- Live response element shapes (the subset our operations select) ---------
 export type LiveEmployerSummary = {
@@ -73,6 +74,38 @@ export function mapPlanYear(p: LivePlanYear): PlanYearRow {
     eligible: p.eligibleCount ?? 0, enrollment: p.enrollmentPct ?? 0, blockers: p.launchBlockers ?? 0,
     oeDaysLeft: p.oeDaysLeft ?? undefined, needAction: p.needsActionCount ?? undefined,
   };
+}
+
+// --- Plan Year Setup checklist (Phase D-1) -----------------------------------
+// GraphQL `PlanYearSetupStatus` → the `PlanYearSetupView` the page renders. The one
+// remap is `key` → `stepKey`; server status values already match `ReadinessStatus`.
+// A live `not_applicable` step's message is an admin-override reason, so it routes to
+// `overrideNote` (italic); other messages stay as the warning `message`.
+export type LiveChecklistStep = {
+  key: string; label: string; description: string | null; category: string | null;
+  requiredByDefault: boolean; status: string; route: string | null; message: string | null;
+};
+export type LivePlanYearSetupStatus = {
+  employerId: string; planYearId: string; completionPct: number; blockers: number; steps: LiveChecklistStep[];
+};
+
+function mapChecklistStep(s: LiveChecklistStep): ChecklistStep {
+  const isNa = s.status === "not_applicable";
+  return {
+    stepKey: s.key,
+    label: s.label,
+    description: s.description ?? "",
+    category: s.category ?? "",
+    requiredByDefault: s.requiredByDefault,
+    route: s.route ?? "",
+    status: s.status as ReadinessStatus,
+    message: isNa ? undefined : s.message ?? undefined,
+    overrideNote: isNa ? s.message ?? undefined : undefined,
+  };
+}
+
+export function mapPlanYearSetupStatus(v: LivePlanYearSetupStatus): PlanYearSetupView {
+  return { completionPct: v.completionPct, blockers: v.blockers, steps: v.steps.map(mapChecklistStep) };
 }
 
 // Census / employee / dependent live shapes match the mock field names — cast through

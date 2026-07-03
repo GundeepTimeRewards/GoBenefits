@@ -1,12 +1,14 @@
 // Plan year query hooks. C1 hybrid: `planYears` + `currentPlanYear` read live when the
-// gate allows; otherwise mock. `usePlanYearActivity` (deferred in C1) and
-// `usePlanYearSetupSteps` (planYearSetupStatus, not C1) stay mock. Default remains mock.
+// gate allows; otherwise mock. `usePlanYearActivity` (deferred in C1) stays mock.
+// `usePlanYearSetupSteps` (planYearSetupStatus, Phase D-1) reads live only when BOTH
+// employerId and planYearId are live UUIDs; otherwise mock. Default remains mock.
 import { useQuery } from "@tanstack/react-query";
 import { getPlanYears, getPlanYearActivity, getEmployerProfile, getPlanYearChecklist } from "@/lib/mock/db";
-import { resolveDataSource } from "./dataSource";
+import { summarizeChecklist, type PlanYearSetupView } from "@/lib/plan-year-checklist-mock";
+import { resolveDataSource, resolvePlanYearScopedSource } from "./dataSource";
 import { graphqlClient } from "./client";
 import { operations, runOperation } from "./operations";
-import { mapPlanYear, type LivePlanYear } from "./liveMappers";
+import { mapPlanYear, mapPlanYearSetupStatus, type LivePlanYear, type LivePlanYearSetupStatus } from "./liveMappers";
 
 export function usePlanYears(employerId: string) {
   const src = resolveDataSource("planYears", employerId);
@@ -48,10 +50,25 @@ export function useCurrentPlanYear(employerId: string) {
   });
 }
 
-// planYearSetupStatus is NOT wired in C1 — always mock.
+/**
+ * Plan Year Setup checklist (Phase D-1). Returns the wrapped `PlanYearSetupView`
+ * ({ completionPct, blockers, steps }) so the page consumes server-authoritative
+ * completion/blocker numbers in live mode. Goes live ONLY when the employer is a live
+ * UUID (via the seam gate) AND the planYearId is a live UUID — never mixing a live
+ * employer with a mock plan-year slug. Otherwise it wraps the mock checklist (mock
+ * visuals unchanged; `getPlanYearChecklist` kept as the fallback source).
+ */
 export function usePlanYearSetupSteps(employerId: string, planYearId: string) {
-  return useQuery({
-    queryKey: ["planYearSetup", employerId, planYearId],
-    queryFn: () => getPlanYearChecklist(employerId, planYearId),
+  const live = resolvePlanYearScopedSource("planYearSetupStatus", employerId, planYearId) === "live";
+  return useQuery<PlanYearSetupView>({
+    queryKey: ["planYearSetup", live ? "live" : "mock", employerId, planYearId],
+    queryFn: live
+      ? async () => {
+          const r = (await runOperation(graphqlClient, operations.planYearSetupStatus, { employerId, planYearId })) as {
+            planYearSetupStatus: LivePlanYearSetupStatus;
+          };
+          return mapPlanYearSetupStatus(r.planYearSetupStatus);
+        }
+      : () => summarizeChecklist(getPlanYearChecklist(employerId, planYearId)),
   });
 }
