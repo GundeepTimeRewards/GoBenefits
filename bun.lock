@@ -85,8 +85,16 @@
       "version": "0.0.0",
       "dependencies": {
         "@goben/data-access": "*",
+        "@goben/rate-engine": "*",
         "mysql2": "^3.11.0",
       },
+      "devDependencies": {
+        "typescript": "^5.8.3",
+      },
+    },
+    "packages/rate-engine": {
+      "name": "@goben/rate-engine",
+      "version": "0.0.0",
       "devDependencies": {
         "typescript": "^5.8.3",
       },
@@ -242,6 +250,8 @@
     "@goben/graphql-resolver": ["@goben/graphql-resolver@workspace:api/resolvers"],
 
     "@goben/migration-runner": ["@goben/migration-runner@workspace:migration/runner"],
+
+    "@goben/rate-engine": ["@goben/rate-engine@workspace:packages/rate-engine"],
 
     "@goben/web": ["@goben/web@workspace:apps/web"],
 
