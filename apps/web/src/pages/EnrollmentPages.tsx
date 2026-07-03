@@ -12,6 +12,8 @@ import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useRole } from "@/lib/role-context";
 import { useEmployer, useEnrollmentProgress, useEnrollmentCenter } from "@/lib/api";
+import { useLaunchEnrollment, type FormMutationError } from "@/lib/api/mutationHooks";
+import { NewEnrollmentWindowForm, SendRemindersControl } from "@/components/enrollment/EnrollmentForms";
 import type { LaunchReadiness, PlanYearRow, OpenEnrollmentSummary, OngoingWorkItem, OngoingWorkUrgency } from "@/lib/mock/db";
 
 const WINDOW_TYPES = ["All", "Open Enrollment", "New Hire", "Life Event", "Special Enrollment"] as const;
@@ -52,6 +54,7 @@ export function EnrollmentEventsPage() {
   const { role } = useRole();
   const [typeFilter, setTypeFilter] = useState<(typeof WINDOW_TYPES)[number]>("All");
   const [launched, setLaunched] = useState(false);
+  const launch = useLaunchEnrollment(employerId);
 
   if (!employer || !py || !center || !center.openEnrollmentSummary || !center.launchReadiness) return <LoadingCard label="Loading enrollment center…" />;
   const oe = center.openEnrollmentSummary;
@@ -81,14 +84,18 @@ export function EnrollmentEventsPage() {
         actions={showHeaderActions ? (
           <>
             <Button variant="outline" size="sm" asChild><Link to="/employee/enroll"><Eye className="mr-1.5 h-4 w-4" />Preview Employee Experience</Link></Button>
-            <Button variant="outline" size="sm"><Plus className="mr-1.5 h-4 w-4" />New Enrollment Window</Button>
+            <NewEnrollmentWindowForm employerId={employerId} planYearId={planYearId} />
           </>
         ) : undefined}
       />
 
       {/* State-aware primary card */}
       {readiness.launchState === "not_launched" && (
-        <LaunchReadinessCard readiness={readiness} blockers={blockers} warnings={warnings} canLaunch={canLaunch} brokerView={brokerView} launched={launched} onLaunch={() => setLaunched(true)} />
+        <LaunchReadinessCard
+          readiness={readiness} blockers={blockers} warnings={warnings} canLaunch={canLaunch} brokerView={brokerView}
+          launched={launched} launching={launch.isPending} launchError={launch.error}
+          onLaunch={() => launch.mutate({ planYearId }, { onSuccess: () => setLaunched(true) })}
+        />
       )}
       {readiness.launchState === "launched" && <ProgressSummaryCard oe={oe} employerId={employerId} />}
       {readiness.launchState === "closed" && <ResultsSummaryCard oe={oe} py={py} employerId={employerId} />}
@@ -109,7 +116,7 @@ export function EnrollmentEventsPage() {
                   : `${visibleWindows.length} window${visibleWindows.length !== 1 ? "s" : ""} · read-only archive`}
               </p>
             </div>
-            {canCreateWindow && <Button variant="ghost" size="sm"><Plus className="mr-1.5 h-4 w-4" />New Enrollment Window</Button>}
+            {canCreateWindow && <NewEnrollmentWindowForm employerId={employerId} planYearId={planYearId} variant="ghost" />}
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {WINDOW_TYPES.map((t) => (
@@ -210,11 +217,13 @@ function OngoingEnrollmentWork({ items, employerId }: { items: OngoingWorkItem[]
 }
 
 // If NOT launched → launch readiness + blockers/warnings + gated Launch button.
-function LaunchReadinessCard({ readiness, blockers, warnings, canLaunch, brokerView, launched, onLaunch }: {
+function LaunchReadinessCard({ readiness, blockers, warnings, canLaunch, brokerView, launched, launching, launchError, onLaunch }: {
   readiness: LaunchReadiness;
   blockers: LaunchReadiness["blockers"];
   warnings: LaunchReadiness["warnings"];
-  canLaunch: boolean; brokerView: boolean; launched: boolean; onLaunch: () => void;
+  canLaunch: boolean; brokerView: boolean; launched: boolean;
+  launching?: boolean; launchError?: FormMutationError | null;
+  onLaunch: () => void;
 }) {
   return (
     <Card className="border-warning/30">
@@ -305,12 +314,13 @@ function LaunchReadinessCard({ readiness, blockers, warnings, canLaunch, brokerV
             {brokerView ? (
               <Button size="sm" variant="secondary" disabled className="opacity-70"><Lock className="mr-1.5 h-4 w-4" />{blockers.length > 0 ? "Employer approval required" : "Ready for Employer Review"}</Button>
             ) : (
-              <Button size="sm" disabled={!canLaunch || launched} onClick={onLaunch} className="bg-warning text-warning-foreground hover:bg-warning/90 disabled:opacity-60">
-                <Rocket className="mr-1.5 h-4 w-4" />{launched ? "Enrollment Launched" : "Launch Enrollment"}
+              <Button size="sm" disabled={!canLaunch || launched || launching} onClick={onLaunch} className="bg-warning text-warning-foreground hover:bg-warning/90 disabled:opacity-60">
+                <Rocket className="mr-1.5 h-4 w-4" />{launched ? "Enrollment Launched" : launching ? "Launching…" : "Launch Enrollment"}
               </Button>
             )}
           </div>
         </div>
+        {launchError && <p className="text-xs text-destructive">{launchError.message}</p>}
       </CardContent>
     </Card>
   );
@@ -318,6 +328,7 @@ function LaunchReadinessCard({ readiness, blockers, warnings, canLaunch, brokerV
 
 // If OPEN → live progress SUMMARY of the ANNUAL OE window (not new hire / QLE).
 function ProgressSummaryCard({ oe, employerId }: { oe: OpenEnrollmentSummary; employerId: string }) {
+  const planYearId = useActivePlanYearId();
   return (
     <Card className="border-success/30">
       <CardHeader className="pb-3">
@@ -340,7 +351,7 @@ function ProgressSummaryCard({ oe, employerId }: { oe: OpenEnrollmentSummary; em
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <p className="text-xs text-muted-foreground">{oe.notStarted} employees haven't started — a reminder can nudge them.</p>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm"><Send className="mr-1.5 h-4 w-4" />Send Reminders</Button>
+            <SendRemindersControl employerId={employerId} planYearId={planYearId} />
             <Button asChild size="sm"><Link to="/employers/$employerId/enrollment-progress" params={{ employerId }}>View Enrollment Progress <ArrowRight className="ml-1.5 h-4 w-4" /></Link></Button>
           </div>
         </div>
@@ -411,7 +422,7 @@ export function EnrollmentProgressPage() {
   if (!employer || !p) return <LoadingCard label="Loading enrollment progress…" />;
   return (
     <div className="mx-auto max-w-[1100px] space-y-4">
-      <PageHeader title="Enrollment Progress" subtitle={`${employer.name} · ${py?.label ?? ""} · ${p.status}`} actions={<Button size="sm">Send Reminders</Button>} />
+      <PageHeader title="Enrollment Progress" subtitle={`${employer.name} · ${py?.label ?? ""} · ${p.status}`} actions={<SendRemindersControl employerId={employerId} planYearId={planYearId} />} />
       <KpiRow items={[
         { label: "Submitted", value: p.submitted, tone: "text-success" },
         { label: "In Progress", value: p.inProgress, tone: "text-info" },

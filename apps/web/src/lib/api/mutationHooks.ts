@@ -18,6 +18,7 @@ import {
   type AddPlanArgs,
   type ImportRatesArgs,
   type ContributionRuleInput,
+  type CreateEnrollmentWindowInput,
 } from "./operations";
 
 export type MutationErrorType = "validation" | "unauthorized" | "error";
@@ -257,6 +258,53 @@ export function useUpdateContributionRule(employerId: string) {
     },
     onSuccess: (res) => {
       if (res.live) return invalidate(PLAN_CATALOG_READS);
+    },
+  });
+}
+
+// --- Enrollment mutations (Phase D-7) -------------------------------------------
+// Launch/reminders/window changes show up in the enrollment aggregates and the
+// dashboards that embed them.
+const ENROLLMENT_READS = ["enrollmentCenter", "enrollmentProgress", "employerOverview", "planYearSetup"];
+
+export function useLaunchEnrollment(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string }>({
+    mutationFn: async ({ planYearId }) => {
+      if (resolveDataSource("launchEnrollment", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.launchEnrollment, { employerId, planYearId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(ENROLLMENT_READS);
+    },
+  });
+}
+
+export function useSendEnrollmentReminders(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string; audience?: string }>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("sendEnrollmentReminders", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.sendEnrollmentReminders, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(ENROLLMENT_READS);
+    },
+  });
+}
+
+export function useCreateEnrollmentWindow(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planYearId: string; input: CreateEnrollmentWindowInput }>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("createEnrollmentWindow", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.createEnrollmentWindow, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(ENROLLMENT_READS);
     },
   });
 }
