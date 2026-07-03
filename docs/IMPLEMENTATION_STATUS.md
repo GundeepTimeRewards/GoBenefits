@@ -90,6 +90,7 @@ bun test               # 63/63 (full)
 | Reference seed (roles/permissions/benefit types/steps/life events) | drafted | n/a | ✅ applied (+dependent.read fix) | idempotent |
 | Module 1 — Census (list/get/create/update + context) | drafted | ✅ validation, normalization | ✅ census 14/14 | |
 | Module 1b — Employee Detail + Dependents | drafted | ✅ dependent validation | ✅ dependents 6/6 | |
+| Phase D-5 — Plan-year lifecycle mutations (create / renewal copy-forward / activate / archive) | done | n/a | ✅ plan-year-mutations 10/10 | copy-forward deep-copies plans+options+rates as drafts, year-shifted effective dates; activate enforces single-active; `plan_year.manage` co-granted to employer_admin (0006) |
 
 **Not started (gated until integration is green):** enrollment, payroll exports,
 carrier exports, COBRA, ACA, bulk census import, migration execution.

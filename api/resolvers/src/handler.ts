@@ -67,6 +67,16 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return employerService.listPlanYears(ctx, a.employerId);
     case "currentPlanYear":
       return employerService.currentPlanYear(ctx, a.employerId);
+    // Plan-year lifecycle mutations (Phase D-5) — create / renewal copy-forward /
+    // activate (single-active invariant) / archive. All on `plan_year.manage`.
+    case "createPlanYear":
+      return employerService.createPlanYear(ctx, a.employerId, a.year, a.label);
+    case "copyFromPriorYear":
+      return employerService.copyFromPriorYear(ctx, a.employerId, a.fromPlanYearId, a.toYear);
+    case "activatePlanYear":
+      return employerService.activatePlanYear(ctx, a.employerId, a.planYearId);
+    case "archivePlanYear":
+      return employerService.archivePlanYear(ctx, a.employerId, a.planYearId);
     // Plan Year Setup checklist (Phase D-1) — derived aggregate read model.
     case "planYearSetupStatus":
       return employerService.planYearSetupStatus(ctx, a.employerId, a.planYearId);
