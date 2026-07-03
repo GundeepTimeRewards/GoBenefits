@@ -875,6 +875,12 @@ type Mutation {
   recalculateLookback(employerId: ID!, planYearId: ID!): JobHandle
 
   ## --- FUTURE: Compliance (Phase F) — NOT IMPLEMENTED ---
+  ## (Phase F-2 — IMPLEMENTED per the 2026-07-03 scope decisions) generate1095c uses a
+  ## documented simplified code set (offered→1E else 1H; enrolled→2C, not-full-time→2B)
+  ## and NEVER overwrites migrated filed/corrected archive rows (historical 1095s are
+  ## archive-retrieval only). sendToFilingPartner fails closed — e-filing not enabled.
+  ## calculateAleStatus: monthly FT (130+ hrs) + FTE (capped PT hours ÷ 120) from
+  ## imported payroll; ALE when the year average ≥ 50 (§4980H(c)(2)).
   generate1095c(employerId: ID!, complianceYear: Int!): JobHandle
   sendToFilingPartner(employerId: ID!, complianceYear: Int!): JobHandle
   calculateAleStatus(employerId: ID!, complianceYear: Int!): JobHandle

@@ -27,6 +27,7 @@ import * as lifeEventRepo from "./life-event-repository.js";
 import * as docRepo from "./document-repository.js";
 import * as payrollDataRepo from "./payroll-data-repository.js";
 import * as cobraRepo from "./cobra-repository.js";
+import * as acaRepo from "./aca-repository.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -1240,6 +1241,238 @@ export async function recordCobraElection(
 export async function recordCobraPayment(ctx: AuthContext, employerId: string): Promise<never> {
   await getCustomerDb(ctx, "cobra.manage", employerId); // authorization still applies
   throw new ValidationError("COBRA premium collection is administered by the TPA — payment tracking is not enabled");
+}
+
+/**
+ * IRS affordability percentage by plan year (Rev. Proc. annual updates; the W-2
+ * safe-harbor test compares the self-only premium to wages × this percentage).
+ * Fallback is the statutory 9.5 baseline for years not yet published here.
+ */
+const AFFORDABILITY_PCT_BY_YEAR: Record<number, number> = { 2024: 8.39, 2025: 9.02, 2026: 9.02 };
+const affordabilityPct = (year: number) => AFFORDABILITY_PCT_BY_YEAR[year] ?? 9.5;
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * ALE determination (Phase F-2). `aca.manage`. Computes monthly full-time (130+
+ * hours) and FTE (part-time hours capped at 120 ÷ 120) counts from imported payroll
+ * and upserts ale_monthly_snapshot; ALE when the year's average total ≥ 50
+ * (§4980H(c)(2)). Synchronous locally; JobHandle kept for the prod async path.
+ */
+export async function calculateAleStatus(ctx: AuthContext, employerId: string, complianceYear: number): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "aca.manage", employerId);
+  if (!Number.isInteger(complianceYear) || complianceYear < 2000 || complianceYear > 2100) {
+    throw new ValidationError("complianceYear must be a 4-digit year");
+  }
+  const res = await acaRepo.calculateAleMonths(db, complianceYear);
+  if (res.months === 0) {
+    return { jobId: randomUUID(), status: `completed: no imported payroll hours for ${complianceYear} — import payroll data first` };
+  }
+  return {
+    jobId: randomUUID(),
+    status: `completed: ${res.months} month(s) measured, avg ${res.avgTotal} FT+FTE — ${res.isAle ? "ALE (50+)" : "not an ALE"}`,
+  };
+}
+
+/**
+ * Generate 1095-C forms (Phase F-2). `aca.manage`. One record per employee with
+ * payroll history, using the documented SIMPLIFIED code set: line14 1E when MEC was
+ * offered (a plan year exists for the year), else 1H; line16 2C when enrolled
+ * (approved election), 2B when the lookback says not-full-time, else blank.
+ * Idempotent per (employee, taxYear); `filed`/`corrected` rows from the legacy
+ * migration archive are NEVER overwritten. E-filing is out of scope by decision —
+ * status stops at `generated`.
+ */
+export async function generate1095c(ctx: AuthContext, employerId: string, complianceYear: number): Promise<{ jobId: string; status: string }> {
+  const { db } = await getCustomerDb(ctx, "aca.manage", employerId);
+  const [pyRows] = await db.query(`SELECT BIN_TO_UUID(id) AS id FROM plan_year WHERE year = :y LIMIT 1`, { y: complianceYear });
+  const planYearId = (pyRows as { id: string }[])[0]?.id ?? null;
+  const enrolled = planYearId ? await acaRepo.enrolledEmployees(db, planYearId) : new Set<string>();
+  const offered = planYearId != null;
+  const inputs = await acaRepo.affordabilityInputs(db, complianceYear);
+
+  let generated = 0;
+  let skippedFiled = 0;
+  for (const emp of inputs) {
+    const line14 = offered ? "1E" : "1H";
+    const line16 = enrolled.has(emp.employeeId) ? "2C" : emp.acaEligible === false ? "2B" : null;
+    const res = await acaRepo.upsert1095(db, {
+      employeeId: emp.employeeId,
+      taxYear: complianceYear,
+      dataJson: JSON.stringify({ line14, line16, months: "All 12 months" }),
+    });
+    if (res === "generated") generated += 1;
+    else skippedFiled += 1;
+  }
+  return {
+    jobId: randomUUID(),
+    status: `completed: ${generated} form(s) generated${skippedFiled ? `, ${skippedFiled} filed/archived form(s) untouched` : ""}`,
+  };
+}
+
+/** E-filing is OUT OF SCOPE by product decision (2026-07-03). Fails closed with the reason. */
+export async function sendToFilingPartner(ctx: AuthContext, employerId: string): Promise<never> {
+  await getCustomerDb(ctx, "aca.manage", employerId); // authorization still applies
+  throw new ValidationError("E-filing is not enabled — filing-partner integration is deferred by product decision (2026-07-03)");
+}
+
+export type ComplianceWorkspaceView = {
+  employerId: string;
+  planYearId: string;
+  complianceYear: number;
+  filingStatus: string | null;
+  overview: {
+    acaReadinessPct: number;
+    aleStatus: string;
+    formsReady: number | null;
+    formsTotal: number | null;
+    cobraPending: number | null;
+    noticesDue: number | null;
+    needsAttention: { key: string; title: string; severity: string; route: string | null }[];
+    deadlines: { date: string; item: string; category: string; status: string }[];
+  };
+  aca: {
+    readinessPercent: number;
+    blockedForms: number;
+    issues: { key: string; label: string; count: number; tone: string }[];
+    ale: { aleStatus: string; avgMonthlyCount: number | null; readinessPercent: number | null; months: { month: string; fullTime: number; ptHours: string | null; fte: string | null; total: string | null; status: string }[] };
+    affordability: { safeHarborMethod: string; affordable: number; needsReview: number; missing: number; employees: { employee: string; basis: string | null; wage: string | null; premium: string | null; result: string; safeHarborCode: string | null; status: string }[] };
+    forms: { employee: string; acaStatus: string | null; line14: string | null; line16: string | null; months: string | null; status: string; issues: string | null }[];
+    filingHistory: { year: string; forms: number | null; partner: string | null; generated: string | null; submitted: string | null; irsStatus: string; corrections: number | null }[];
+  };
+  cobra: CobraCompliance;
+  notices: { type: string; audience: string | null; due: string | null; delivery: string | null; status: string }[];
+};
+
+/**
+ * Compliance workspace (Phase F-2) — the CompliancePage read model. `aca.read`
+ * (+ the F-1 cobra section). Historical 1095s appear in filingHistory from
+ * `filed`/`corrected` rows the legacy migration lands — the archive-retrieval
+ * decision; there is no live historical module.
+ */
+export async function complianceWorkspace(ctx: AuthContext, employerId: string, planYearId: string): Promise<ComplianceWorkspaceView> {
+  const { db } = await getCustomerDb(ctx, "aca.read", employerId);
+  const [pyRows] = await db.query(`SELECT year FROM plan_year WHERE id = UUID_TO_BIN(:id) LIMIT 1`, { id: planYearId });
+  const py = (pyRows as any[])[0];
+  if (!py) throw new ValidationError("Plan year not found for this employer");
+  const complianceYear = Number(py.year);
+
+  const [aleMonths, inputs, forms, history, cobra] = await Promise.all([
+    acaRepo.listAleMonths(db, complianceYear),
+    acaRepo.affordabilityInputs(db, complianceYear),
+    acaRepo.list1095(db, complianceYear),
+    acaRepo.filingHistory(db),
+    cobraCompliance(ctx, employerId),
+  ]);
+
+  // Affordability (W-2 safe harbor): lowest-cost self-only MEDICAL premium vs
+  // wages × the year's IRS percentage — powered by the same rate engine that
+  // generates deductions, so the two can never disagree.
+  const pct = affordabilityPct(complianceYear);
+  const [rule, catalogPlans] = await Promise.all([
+    deductionRepo.getFullContributionRule(db),
+    catalogRepo.listCatalogPlans(db, planYearId),
+  ]);
+  let lowestSelfOnly: number | null = null;
+  for (const plan of catalogPlans.filter((p) => p.benefitTypeKey === "medical")) {
+    const rate = await deductionRepo.getRateBand(db, plan.planId, null);
+    if (!rate) continue;
+    try {
+      const d = computeDeduction({ rate, tier: "ee", split: splitForLine("medical", rule), paysPerYear: 12 });
+      lowestSelfOnly = lowestSelfOnly == null ? d.monthlyEe : Math.min(lowestSelfOnly, d.monthlyEe);
+    } catch { /* plan without an EE tier — skip */ }
+  }
+  const affordabilityRows = inputs.map((e) => {
+    if (e.monthlyWage == null || lowestSelfOnly == null) {
+      return { employee: e.name, basis: "W-2 wages", wage: e.monthlyWage == null ? null : fmtMoney(e.monthlyWage), premium: lowestSelfOnly == null ? null : fmtMoney(lowestSelfOnly), result: "Missing data", safeHarborCode: null, status: "missing" };
+    }
+    const threshold = Math.round(e.monthlyWage * pct) / 100;
+    const affordable = lowestSelfOnly <= threshold;
+    return {
+      employee: e.name,
+      basis: "W-2 wages",
+      wage: fmtMoney(e.monthlyWage),
+      premium: fmtMoney(lowestSelfOnly),
+      result: affordable ? `Affordable (≤ ${pct}%)` : `Unaffordable (> ${pct}%)`,
+      safeHarborCode: affordable ? "2F" : null,
+      status: affordable ? "affordable" : "needs_review",
+    };
+  });
+  const affordable = affordabilityRows.filter((r) => r.status === "affordable").length;
+  const needsReview = affordabilityRows.filter((r) => r.status === "needs_review").length;
+  const missing = affordabilityRows.filter((r) => r.status === "missing").length;
+
+  const avgTotal = aleMonths.length ? Math.round((aleMonths.reduce((s, m) => s + m.total, 0) / aleMonths.length) * 100) / 100 : null;
+  const aleStatus = aleMonths.length === 0 ? "Not calculated" : aleMonths.some((m) => m.isAle) ? "ALE (50+ FT+FTE)" : "Not an ALE";
+  const formsGenerated = forms.filter((f) => f.status !== "draft").length;
+  const issues = [
+    { key: "ale_not_run", label: "ALE determination not calculated", count: aleMonths.length === 0 ? 1 : 0, tone: "warning" },
+    { key: "affordability_review", label: "Employees over the affordability threshold", count: needsReview, tone: "danger" },
+    { key: "affordability_missing", label: "Employees missing wage data", count: missing, tone: "warning" },
+    { key: "forms_missing", label: "1095-C forms not generated", count: inputs.length > 0 && formsGenerated === 0 ? 1 : 0, tone: "warning" },
+  ].filter((i) => i.count > 0);
+  const readinessPercent = Math.max(0, 100 - issues.length * 25);
+
+  return {
+    employerId,
+    planYearId,
+    complianceYear,
+    filingStatus: "E-filing not enabled",
+    overview: {
+      acaReadinessPct: readinessPercent,
+      aleStatus,
+      formsReady: formsGenerated,
+      formsTotal: inputs.length,
+      cobraPending: cobra.qualifyingEvents - cobra.activeParticipants,
+      noticesDue: cobra.overdueNotices,
+      needsAttention: issues.map((i) => ({ key: i.key, title: `${i.label} (${i.count})`, severity: i.tone === "danger" ? "high" : "medium", route: null })),
+      deadlines: [
+        { date: `${complianceYear + 1}-01-31`, item: "Furnish 1095-C to employees", category: "ACA", status: "upcoming" },
+        { date: `${complianceYear + 1}-03-31`, item: "IRS 1094-C/1095-C filing (via partner — not enabled)", category: "ACA", status: "not_enabled" },
+      ],
+    },
+    aca: {
+      readinessPercent,
+      blockedForms: needsReview + missing,
+      issues,
+      ale: {
+        aleStatus,
+        avgMonthlyCount: avgTotal,
+        readinessPercent: aleMonths.length ? Math.round((aleMonths.length / 12) * 100) : 0,
+        months: aleMonths.map((m) => ({
+          month: MONTH_NAMES[m.month - 1] ?? String(m.month),
+          fullTime: m.fullTime,
+          ptHours: m.ptHours.toFixed(2),
+          fte: m.fte.toFixed(2),
+          total: String(m.total),
+          status: m.isAle == null ? "—" : m.isAle ? "ALE year" : "Below threshold",
+        })),
+      },
+      affordability: { safeHarborMethod: `W-2 wages (${pct}%)`, affordable, needsReview, missing, employees: affordabilityRows },
+      forms: forms.map((f) => ({
+        employee: f.employee,
+        acaStatus: f.acaStatus,
+        line14: f.line14,
+        line16: f.line16,
+        months: f.months,
+        status: f.status,
+        issues: null,
+      })),
+      filingHistory: history.map((h) => ({
+        year: String(h.year),
+        forms: h.forms,
+        partner: h.filed > 0 ? "Legacy (migrated archive)" : null,
+        generated: null,
+        submitted: null,
+        irsStatus: h.filed > 0 ? "Filed (archive)" : "Not filed — e-filing not enabled",
+        corrections: h.corrected,
+      })),
+    },
+    cobra,
+    notices: cobra.events
+      .filter((e) => e.cobraStatus === "notice_due" || e.cobraStatus === "notice_overdue")
+      .map((e) => ({ type: "COBRA election notice", audience: e.person, due: e.nextStep, delivery: "Mail/portal", status: e.cobraStatus === "notice_overdue" ? "overdue" : "due" })),
+  };
 }
 
 /** Age in whole years at a date (nulls → null: composite rates only). */

@@ -146,6 +146,16 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "recalculateLookback":
       return employerService.runAcaLookback(ctx, a.employerId, a.planYearId);
 
+    // --- ACA compliance (Phase F-2) — aca.read / aca.manage; no e-file by decision ---
+    case "complianceWorkspace":
+      return employerService.complianceWorkspace(ctx, a.employerId, a.planYearId);
+    case "calculateAleStatus":
+      return employerService.calculateAleStatus(ctx, a.employerId, a.complianceYear);
+    case "generate1095c":
+      return employerService.generate1095c(ctx, a.employerId, a.complianceYear);
+    case "sendToFilingPartner":
+      return employerService.sendToFilingPartner(ctx, a.employerId);
+
     // --- COBRA (Phase F-1) — cobra.read / cobra.manage; payments are TPA-administered ---
     case "createCobraEvent":
       return employerService.createCobraEvent(ctx, a.employerId, a.input);
