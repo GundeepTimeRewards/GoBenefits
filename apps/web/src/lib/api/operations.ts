@@ -92,6 +92,16 @@ export type ContributionRuleInput = {
   fixedBasicLife?: number;
 };
 export type UpdateContributionRuleArgs = { employerId: string; input: ContributionRuleInput };
+export type LaunchEnrollmentArgs = { employerId: string; planYearId: string };
+export type SendRemindersArgs = { employerId: string; planYearId: string; audience?: string };
+export type CreateEnrollmentWindowInput = {
+  type: string;
+  name?: string;
+  windowStart: string;
+  windowEnd: string;
+  effectiveDate?: string;
+};
+export type CreateEnrollmentWindowArgs = { employerId: string; planYearId: string; input: CreateEnrollmentWindowInput };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -240,6 +250,18 @@ const UPDATE_CONTRIBUTION_RULE = `mutation UpdateContributionRule($employerId: I
   updateContributionRule(employerId: $employerId, input: $input) ${ACTION_RESULT_FIELDS}
 }`;
 
+// Enrollment mutations (Phase D-7). Launch returns a minimal aggregate slice — the
+// hooks invalidate the full enrollmentCenter read, so the payload only confirms state.
+const LAUNCH_ENROLLMENT = `mutation LaunchEnrollment($employerId: ID!, $planYearId: ID!) {
+  launchEnrollment(employerId: $employerId, planYearId: $planYearId) { launchState }
+}`;
+const SEND_ENROLLMENT_REMINDERS = `mutation SendEnrollmentReminders($employerId: ID!, $planYearId: ID!, $audience: String) {
+  sendEnrollmentReminders(employerId: $employerId, planYearId: $planYearId, audience: $audience) { jobId status }
+}`;
+const CREATE_ENROLLMENT_WINDOW = `mutation CreateEnrollmentWindow($employerId: ID!, $planYearId: ID!, $input: CreateEnrollmentWindowInput!) {
+  createEnrollmentWindow(employerId: $employerId, planYearId: $planYearId, input: $input) { id name type windowLabel status nextAction }
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -272,6 +294,9 @@ export const operations = {
   duplicatePlan: { name: "duplicatePlan", kind: "mutation", document: DUPLICATE_PLAN, buildVariables: (a: DuplicatePlanArgs) => ({ employerId: a.employerId, planId: a.planId }) } as C1Operation<DuplicatePlanArgs, unknown>,
   importRates: { name: "importRates", kind: "mutation", document: IMPORT_RATES, buildVariables: (a: ImportRatesArgs) => ({ employerId: a.employerId, planId: a.planId, input: a.input }) } as C1Operation<ImportRatesArgs, unknown>,
   updateContributionRule: { name: "updateContributionRule", kind: "mutation", document: UPDATE_CONTRIBUTION_RULE, buildVariables: (a: UpdateContributionRuleArgs) => ({ employerId: a.employerId, input: compact(a.input) }) } as C1Operation<UpdateContributionRuleArgs, unknown>,
+  launchEnrollment: { name: "launchEnrollment", kind: "mutation", document: LAUNCH_ENROLLMENT, buildVariables: (a: LaunchEnrollmentArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<LaunchEnrollmentArgs, unknown>,
+  sendEnrollmentReminders: { name: "sendEnrollmentReminders", kind: "mutation", document: SEND_ENROLLMENT_REMINDERS, buildVariables: (a: SendRemindersArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, audience: a.audience }) } as C1Operation<SendRemindersArgs, unknown>,
+  createEnrollmentWindow: { name: "createEnrollmentWindow", kind: "mutation", document: CREATE_ENROLLMENT_WINDOW, buildVariables: (a: CreateEnrollmentWindowArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, input: compact(a.input) }) } as C1Operation<CreateEnrollmentWindowArgs, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

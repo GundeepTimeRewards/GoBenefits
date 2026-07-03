@@ -85,3 +85,23 @@ describe("Plans & Rates mutation variable mapping (Phase D-6)", () => {
     expect(vars).toEqual({ employerId: "e1", input: { pctEmployeeHealth: 75 } });
   });
 });
+
+describe("enrollment mutation variable mapping (Phase D-7)", () => {
+  test("launchEnrollment passes employerId + planYearId", () => {
+    expect(operations.launchEnrollment.buildVariables({ employerId: "e1", planYearId: "py" })).toEqual({ employerId: "e1", planYearId: "py" });
+  });
+  test("sendEnrollmentReminders drops omitted audience", () => {
+    const vars = operations.sendEnrollmentReminders.buildVariables({ employerId: "e1", planYearId: "py" });
+    expect(vars).toEqual({ employerId: "e1", planYearId: "py" });
+    expect("audience" in vars).toBe(false);
+    expect(operations.sendEnrollmentReminders.buildVariables({ employerId: "e1", planYearId: "py", audience: "not_started" }))
+      .toEqual({ employerId: "e1", planYearId: "py", audience: "not_started" });
+  });
+  test("createEnrollmentWindow compacts optional input fields", () => {
+    const vars = operations.createEnrollmentWindow.buildVariables({
+      employerId: "e1", planYearId: "py",
+      input: { type: "new_hire", windowStart: "2026-01-01", windowEnd: "2026-02-01", name: undefined },
+    });
+    expect(vars).toEqual({ employerId: "e1", planYearId: "py", input: { type: "new_hire", windowStart: "2026-01-01", windowEnd: "2026-02-01" } });
+  });
+});
