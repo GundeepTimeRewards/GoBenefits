@@ -5,7 +5,7 @@ import type { GraphQLClient } from "./client";
 
 describe("C1 operation registry", () => {
   test("exposes the C1 operations + Phase D reads/mutations + E-1 elections review", () => {
-    expect(C1_OPERATION_NAMES.length).toBe(41);
+    expect(C1_OPERATION_NAMES.length).toBe(48);
     for (const name of [
       "me", "myEmployers", "employer", "employerOverview", "planYears", "currentPlanYear", "planYearSetupStatus",
       "planCatalog", "benefitPlanDetail", "enrollmentProgress", "enrollmentCenter", "employerCensusContext",
@@ -16,15 +16,17 @@ describe("C1 operation registry", () => {
       "launchEnrollment", "sendEnrollmentReminders", "createEnrollmentWindow",
       "electionReview", "approveElection", "sendBackElection", "requestEoi", "requestDependentDocs", "approveAllReadyElections",
       "deductionsWorkspace", "mapDeductionCode", "exportReadyDeductions", "reconcileBatch",
+      "lifeEventQueue", "approveLifeEvent", "denyLifeEvent", "requestLifeEventDocs", "openElectionWindow",
+      "documentWorkspace", "generateConfirmations",
     ]) {
       expect(C1_OPERATION_NAMES).toContain(name as any);
     }
   });
 
-  test("kinds are correct (17 queries, 24 mutations)", () => {
+  test("kinds are correct (19 queries, 29 mutations)", () => {
     const kinds = C1_OPERATION_NAMES.map((n) => operations[n].kind);
-    expect(kinds.filter((k) => k === "query").length).toBe(17);
-    expect(kinds.filter((k) => k === "mutation").length).toBe(24);
+    expect(kinds.filter((k) => k === "query").length).toBe(19);
+    expect(kinds.filter((k) => k === "mutation").length).toBe(29);
   });
 
   test("benefitPlanDetail builds employerId + planYearId + planId variables", () => {

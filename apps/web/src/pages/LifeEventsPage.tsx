@@ -10,6 +10,7 @@ import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useRole } from "@/lib/role-context";
 import { useEmployer, useLifeEventQueue } from "@/lib/api";
+import { useApproveLifeEvent, useDenyLifeEvent, useRequestLifeEventDocs, useOpenElectionWindow } from "@/lib/api/mutationHooks";
 import type { LifeEventCase, LifeEventCaseStatus } from "@/lib/mock/db";
 
 type Icon = ComponentType<{ className?: string }>;
@@ -145,7 +146,11 @@ export function LifeEventsPage() {
                       <TableCell className="text-sm text-muted-foreground">{r.electionWindow}</TableCell>
                       <TableCell className="text-sm">{nextStepText(r)}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" className="h-8">{queue.readOnly ? "View" : rowAction(r.status)}</Button>
+                        {queue.readOnly ? (
+                          <Button size="sm" variant="outline" className="h-8">View</Button>
+                        ) : (
+                          <CaseActions employerId={employerId} caseId={r.id} status={r.status} nextStep={r.nextStep} />
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -171,4 +176,44 @@ export function LifeEventsPage() {
       </div>
     </div>
   );
+}
+
+
+// Live HR decision actions per case (Phase E-6). Mock mode no-ops via the hooks'
+// data-source gate. "Needs Review" covers both fresh submissions and approved
+// cases awaiting a window — nextStep disambiguates which action applies.
+function CaseActions({ employerId, caseId, status, nextStep }: { employerId: string; caseId: string; status: string; nextStep: string }) {
+  const approve = useApproveLifeEvent(employerId);
+  const deny = useDenyLifeEvent(employerId);
+  const reqDocs = useRequestLifeEventDocs(employerId);
+  const openWindow = useOpenElectionWindow(employerId);
+  const pending = approve.isPending || deny.isPending || reqDocs.isPending || openWindow.isPending;
+  const error = approve.error ?? deny.error ?? reqDocs.error ?? openWindow.error;
+
+  if (status === "Needs Review" && nextStep === "Open election window") {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {error && <span className="text-[11px] text-destructive">{error.message}</span>}
+        <Button size="sm" className="h-8" disabled={pending} onClick={() => openWindow.mutate({ caseId })}>
+          {openWindow.isPending ? "Opening…" : "Open Window"}
+        </Button>
+      </span>
+    );
+  }
+  if (status === "Needs Review" || status === "Needs Documents") {
+    return (
+      <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+        {error && <span className="text-[11px] text-destructive">{error.message}</span>}
+        {status === "Needs Review" && (
+          <Button size="sm" variant="outline" className="h-8" disabled={pending} onClick={() => reqDocs.mutate({ caseId })}>Request Docs</Button>
+        )}
+        <Button size="sm" variant="outline" className="h-8 border-destructive/40 text-destructive" disabled={pending}
+          onClick={() => deny.mutate({ caseId, reason: "Denied after HR review" })}>Deny</Button>
+        <Button size="sm" className="h-8" disabled={pending} onClick={() => approve.mutate({ caseId })}>
+          {approve.isPending ? "Approving…" : "Approve"}
+        </Button>
+      </span>
+    );
+  }
+  return <Button size="sm" variant="outline" className="h-8">View</Button>;
 }

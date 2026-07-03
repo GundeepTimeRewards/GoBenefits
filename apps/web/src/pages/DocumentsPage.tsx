@@ -15,6 +15,7 @@ import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useRole } from "@/lib/role-context";
 import { useEmployer, useDocumentWorkspace } from "@/lib/api";
+import { useGenerateConfirmations } from "@/lib/api/mutationHooks";
 import type { DocStatus, DocCategoryName, DocRow, DocReadinessTone } from "@/lib/mock/db";
 
 type Icon = ComponentType<{ className?: string }>;
@@ -131,8 +132,7 @@ export function DocumentsPage() {
         {!ws.readOnly && (
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm"><Upload className="mr-1.5 h-4 w-4" />Upload Document</Button>
-            <Button size="sm"><FilePlus2 className="mr-1.5 h-4 w-4" />Create Form</Button>
-            <Button variant="ghost" size="sm">More</Button>
+            <GenerateConfirmationsButton employerId={employerId} />
           </div>
         )}
       </div>
@@ -301,5 +301,25 @@ export function DocumentsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+// Live confirmation generation (Phase E-6): one confirmation doc + signature request
+// per approved-election employee (idempotent server-side). Mock mode no-ops.
+function GenerateConfirmationsButton({ employerId }: { employerId: string }) {
+  const planYearId = useActivePlanYearId();
+  const m = useGenerateConfirmations(employerId);
+  const status = m.data?.live
+    ? (m.data.data as { generateConfirmations?: { status?: string } })?.generateConfirmations?.status
+    : null;
+  return (
+    <span className="inline-flex items-center gap-2">
+      {status && <span className="text-xs text-success">{status}</span>}
+      {m.error && <span className="text-xs text-destructive">{m.error.message}</span>}
+      <Button size="sm" disabled={m.isPending} onClick={() => m.mutate({ planYearId })}>
+        <FilePlus2 className="mr-1.5 h-4 w-4" />{m.isPending ? "Generating…" : "Generate Confirmations"}
+      </Button>
+    </span>
   );
 }
