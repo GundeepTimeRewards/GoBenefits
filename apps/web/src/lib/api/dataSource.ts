@@ -59,6 +59,10 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "launchEnrollment", // Phase D-7 (enrollment)
   "sendEnrollmentReminders",
   "createEnrollmentWindow",
+  "deductionsWorkspace", // Phase E-2b (plan-year-scoped read; employer-only)
+  "mapDeductionCode",
+  "exportReadyDeductions",
+  "reconcileBatch",
   "electionReview", // Phase E-1 (plan-year-scoped read)
   "approveElection",
   "sendBackElection",

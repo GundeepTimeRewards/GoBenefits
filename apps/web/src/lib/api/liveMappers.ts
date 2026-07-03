@@ -363,3 +363,78 @@ export function mapElectionReview(v: LiveElectionReview): ElectionReview {
     })),
   };
 }
+
+// --- Deductions workspace (Phase E-2b) ----------------------------------------
+import type {
+  DeductionReviewRow as MockDeductionRow, DeductionReviewSummary as MockDeductionSummary,
+  DeductionChange as MockDeductionChange, ExportBatch as MockExportBatch,
+  DeductionReviewStatus, DeductionChangeType, DeductionChangeKind, ExportBatchStatus,
+} from "@/lib/mock/db";
+
+export type LiveDeductionsWorkspace = {
+  readOnly: boolean;
+  deductionSummary: MockDeductionSummary;
+  deductionReview: Array<{
+    id: string; employee: string; plan: string; tier: string; effective: string | null;
+    payrollGroup: string | null; code: string | null; ee: string; er: string;
+    changeType: string; status: string; issue: string | null;
+  }>;
+  deductionChanges: Array<{
+    id: string; employee: string; changeType: string; previous: string; new: string;
+    effective: string | null; status: string;
+  }>;
+  exportBatches: Array<{
+    id: string; batchDate: string | null; payPeriod: string; employees: number;
+    totalEe: string; totalEr: string; status: string; file: string | null; issues: string | null;
+  }>;
+};
+
+export type DeductionsWorkspaceView = {
+  readOnly: boolean;
+  deductionSummary: MockDeductionSummary;
+  deductionReview: MockDeductionRow[];
+  deductionChanges: MockDeductionChange[];
+  exportBatches: MockExportBatch[];
+};
+
+/** Live change type (add/change/none) → the FE row kind union. */
+const ROW_CHANGE_KIND: Record<string, DeductionChangeKind> = {
+  add: "New Election",
+  change: "Rate Change",
+  none: "Changed Election", // placeholder-least-wrong; live rows with no change rarely render a kind
+};
+
+/** Live batch status (DB enum, capitalized by the service) → the FE display union. */
+const BATCH_STATUS: Record<string, ExportBatchStatus> = {
+  Generated: "Exported", // generated & awaiting reconcile reads as Exported in the UI
+  sent: "Exported",
+  Reconciled: "Reconciled",
+  draft: "Draft",
+  failed: "Failed",
+};
+
+export function mapDeductionsWorkspace(v: LiveDeductionsWorkspace): DeductionsWorkspaceView {
+  return {
+    readOnly: v.readOnly,
+    deductionSummary: v.deductionSummary,
+    deductionReview: v.deductionReview.map((r) => ({
+      id: r.id, employee: r.employee, plan: r.plan, tier: r.tier,
+      effective: r.effective ?? "—", payrollGroup: r.payrollGroup ?? "—",
+      code: r.code ?? "", ee: r.ee, er: r.er,
+      changeType: ROW_CHANGE_KIND[r.changeType] ?? "Changed Election",
+      status: r.status as DeductionReviewStatus,
+      issue: r.issue ?? "",
+    })),
+    deductionChanges: v.deductionChanges.map((c) => ({
+      id: c.id, employee: c.employee,
+      changeType: (c.changeType === "Amount change" ? "Deduction amount changed" : c.changeType) as DeductionChangeType,
+      prev: c.previous, next: c.new, effective: c.effective ?? "—", status: c.status,
+    })),
+    exportBatches: v.exportBatches.map((b) => ({
+      id: b.id, batchDate: b.batchDate ?? "—", payPeriod: b.payPeriod, employees: b.employees,
+      totalEe: b.totalEe, totalEr: b.totalEr,
+      status: BATCH_STATUS[b.status] ?? (b.status as ExportBatchStatus),
+      file: b.file ?? "—", issues: b.issues ?? "",
+    })),
+  };
+}
