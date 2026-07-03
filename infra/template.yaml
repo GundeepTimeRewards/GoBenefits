@@ -39,6 +39,11 @@ Globals:
         DB_SECRET_ARN: !Ref DbSecret
         EVENT_BUS_NAME: !Ref EventBus
 
+Conditions:
+  # Dev-only resources (e.g. the smoke-test Cognito client) exist ONLY when Env=dev,
+  # so staging/prod never carry the relaxed auth surface.
+  IsDev: !Equals [!Ref Env, dev]
+
 Resources:
   # ---- Security / config ---------------------------------------------------
   EncryptionKey:
@@ -134,16 +139,35 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub "goben-${Env}"
+      # OPTIONAL MFA requires at least one enabled MFA method. TOTP (authenticator app)
+      # needs no SMS/SNS configuration. Without EnabledMfas, Cognito rejects the create
+      # ("SMS configuration ... required when MFA is required/optional") — this exact
+      # defect rolled back the first goben-dev deploy (FOUNDATION-DEPLOY-2 gap G1).
       MfaConfiguration: "OPTIONAL"
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
       Policies:
         PasswordPolicy: { MinimumLength: 12, RequireNumbers: true, RequireSymbols: true, RequireUppercase: true }
 
+  # Primary app client — SRP only (production posture; unchanged).
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !Ref UserPool
       GenerateSecret: false
       ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+
+  # DEV-ONLY smoke-test client (gap G2): allows the admin password flow so CLI smoke
+  # tests can mint ID tokens via `admin-initiate-auth` without an SRP helper. Exists
+  # ONLY when Env=dev (IsDev); staging/prod never create it. The primary app client
+  # above stays SRP-only.
+  DevTestUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: IsDev
+    Properties:
+      ClientName: !Sub "goben-${Env}-smoke-test"
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_ADMIN_USER_PASSWORD_AUTH, ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
 
   # ---- Eventing (skeleton for later modules) -------------------------------
   EventBus:
@@ -772,6 +796,10 @@ Outputs:
     Value: !Ref UserPool
   UserPoolClientId:
     Value: !Ref UserPoolClient
+  DevTestUserPoolClientId:
+    Condition: IsDev
+    Description: Dev-only Cognito client (admin password flow) for CLI smoke tests.
+    Value: !Ref DevTestUserPoolClient
   DbProxyEndpoint:
     Value: !GetAtt DbProxy.Endpoint
   DocumentsBucket:
