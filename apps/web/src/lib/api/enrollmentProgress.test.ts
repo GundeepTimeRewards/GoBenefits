@@ -46,8 +46,8 @@ describe("Enrollment Progress hybrid gate", () => {
     expect(decidePlanYearScopedSource("hybrid", true, "enrollmentProgress", LIVE_EMP, "2026")).toBe("mock");
     expect(decidePlanYearScopedSource("hybrid", true, "enrollmentProgress", "acme", LIVE_PY)).toBe("mock");
   });
-  test("enrollmentCenter FE stays mock in D-3 (not live-capable; deferred to D-3b)", () => {
-    expect(decideDataSource("hybrid", true, "enrollmentCenter", LIVE_EMP)).toBe("mock");
+  test("enrollmentCenter is now live-capable too (wired in D-3b)", () => {
+    expect(decideDataSource("hybrid", true, "enrollmentCenter", LIVE_EMP)).toBe("live");
   });
   test("mock mode remains the default", () => {
     expect(DATA_SOURCE_MODE).toBe("mock");

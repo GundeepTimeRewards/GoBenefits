@@ -127,6 +127,19 @@ const ENROLLMENT_PROGRESS = `query EnrollmentProgress($employerId: ID!, $planYea
   }
 }`;
 
+const ENROLLMENT_CENTER = `query EnrollmentCenter($employerId: ID!, $planYearId: ID!) {
+  enrollmentCenter(employerId: $employerId, planYearId: $planYearId) {
+    employerId planYearId launchState
+    launchReadiness { planYearStatus readinessPercent canLaunch launchState
+      blockers { key label severity area description }
+      warnings { key label severity area description }
+      checklist { key label status } }
+    openEnrollmentSummary { completionPercent eligible submitted inProgress notStarted needsAction enrolled waived lateMissing carrierFilesStatus }
+    windows { id name type windowLabel effectiveRule employeesAffected status completion nextAction }
+    ongoingWork { key label count countLabel status urgency nextAction route }
+  }
+}`;
+
 const EMPLOYER_CENSUS_CONTEXT = `query EmployerCensusContext($employerId: ID!, $planYearId: ID!) {
   employerCensusContext(employerId: $employerId, planYearId: $planYearId) { employerId employerName planYearId planYearLabel totalEmployees activeEmployees missingRequiredCount missingEligibilityClassCount dependentsMissingDataCount needsReviewCount }
 }`;
@@ -181,6 +194,7 @@ export const operations = {
   planCatalog: { name: "planCatalog", kind: "query", document: PLAN_CATALOG, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   benefitPlanDetail: { name: "benefitPlanDetail", kind: "query", document: BENEFIT_PLAN_DETAIL, buildVariables: (a: PlanDetailArgs) => ({ employerId: a.employerId, planYearId: a.planYearId, planId: a.planId }) } as C1Operation<PlanDetailArgs, unknown>,
   enrollmentProgress: { name: "enrollmentProgress", kind: "query", document: ENROLLMENT_PROGRESS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  enrollmentCenter: { name: "enrollmentCenter", kind: "query", document: ENROLLMENT_CENTER, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   employerCensusContext: { name: "employerCensusContext", kind: "query", document: EMPLOYER_CENSUS_CONTEXT, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   employees: { name: "employees", kind: "query", document: EMPLOYEES, buildVariables: (a: EmployeesArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, search: a.search, limit: a.limit, nextToken: a.nextToken }) } as C1Operation<EmployeesArgs, unknown>,
   employeeDetail: { name: "employeeDetail", kind: "query", document: EMPLOYEE_DETAIL, buildVariables: (a: EmployeeArgs) => ({ employerId: a.employerId, employeeId: a.employeeId }) } as C1Operation<EmployeeArgs, unknown>,

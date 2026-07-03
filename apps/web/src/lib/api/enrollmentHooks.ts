@@ -1,14 +1,14 @@
-// Enrollment query hooks. Phase D-3 hybrid: `enrollmentProgress` reads live when the gate
-// allows (employer + plan year live UUIDs); otherwise mock. The broader Enrollment Center
-// hooks (launchReadiness/windows/ongoingWork/openEnrollmentSummary) stay mock — their
-// consolidation onto the live `enrollmentCenter` aggregate is deferred to D-3b. Mock
-// mode is the default and mock getters remain the fallback.
+// Enrollment query hooks. Phase D-3/D-3b hybrid: `enrollmentProgress` and the consolidated
+// `enrollmentCenter` read live when the gate allows (employer + plan year live UUIDs);
+// otherwise mock. The 4 granular Enrollment Center getters stay exported (the mock branch of
+// `useEnrollmentCenter` reuses them, and no other consumer must change). Mock mode is the
+// default and mock getters remain the fallback.
 import { useQuery } from "@tanstack/react-query";
 import { getEnrollment, getOpenEnrollmentDashboard, getLaunchReadiness, getEnrollmentWindows, getOngoingEnrollmentWork, getOpenEnrollmentSummary, getElectionReview, getLifeEventQueue } from "@/lib/mock/db";
 import { resolvePlanYearScopedSource } from "./dataSource";
 import { graphqlClient } from "./client";
 import { operations, runOperation } from "./operations";
-import { mapEnrollmentProgress, type LiveEnrollmentProgress } from "./liveMappers";
+import { mapEnrollmentProgress, mapEnrollmentCenter, type LiveEnrollmentProgress, type LiveEnrollmentCenter, type EnrollmentCenterView } from "./liveMappers";
 
 export function useEnrollmentEvents(employerId: string) {
   return useQuery({ queryKey: ["enrollmentEvents", employerId], queryFn: () => getEnrollment(employerId) });
@@ -36,6 +36,33 @@ export function useEnrollmentProgress(employerId: string, planYearId: string) {
 
 export function useOpenEnrollmentDashboard(employerId: string) {
   return useQuery({ queryKey: ["oeDashboard", employerId], queryFn: () => getOpenEnrollmentDashboard(employerId) });
+}
+
+/**
+ * Enrollment Center (Phase D-3b) — the consolidated command-center read. Returns the
+ * 4-part bundle { launchReadiness, openEnrollmentSummary, windows, ongoingWork }. Live
+ * (one `enrollmentCenter` aggregate) only when employerId + planYearId are both live
+ * UUIDs; otherwise composed from the existing 4 mock getters — byte-identical to the
+ * pre-D-3b page. Mock fallback preserved.
+ */
+export function useEnrollmentCenter(employerId: string, planYearId: string) {
+  const live = resolvePlanYearScopedSource("enrollmentCenter", employerId, planYearId) === "live";
+  return useQuery<EnrollmentCenterView>({
+    queryKey: ["enrollmentCenter", live ? "live" : "mock", employerId, planYearId],
+    queryFn: live
+      ? async () => {
+          const r = (await runOperation(graphqlClient, operations.enrollmentCenter, { employerId, planYearId })) as {
+            enrollmentCenter: LiveEnrollmentCenter;
+          };
+          return mapEnrollmentCenter(r.enrollmentCenter);
+        }
+      : () => ({
+          launchReadiness: getLaunchReadiness(employerId, planYearId),
+          openEnrollmentSummary: getOpenEnrollmentSummary(employerId, planYearId),
+          windows: getEnrollmentWindows(employerId, planYearId),
+          ongoingWork: getOngoingEnrollmentWork(employerId, planYearId),
+        }),
+  });
 }
 
 export function useLaunchReadiness(employerId: string, planYearId: string) {
