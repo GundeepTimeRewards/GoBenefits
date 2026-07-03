@@ -32,6 +32,7 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "employer",
   "planYears",
   "currentPlanYear",
+  "planYearSetupStatus", // Phase D-1 (plan-year-scoped: gate on a live UUID planYearId)
   "employees",
   "employerCensusContext",
   "employeeDetail",
@@ -105,6 +106,32 @@ export function resolveDataSource(hookKey: string, requiredLiveId?: string | nul
 /** React-friendly alias (currently identical; kept for the documented API surface). */
 export function useDataSource(hookKey: string, requiredLiveId?: string | null): DataSourceResolution {
   return resolveDataSource(hookKey, requiredLiveId);
+}
+
+/**
+ * PURE decision for a PLAN-YEAR-SCOPED hook (Phase D-1+): live only when the base gate
+ * says live for the employer AND the planYearId is also a live UUID. This is the guard
+ * that stops a live employer from being paired with a mock plan-year slug (id-space
+ * mixing) — both ids must be live or we stay on mock.
+ */
+export function decidePlanYearScopedSource(
+  mode: DataSourceMode,
+  liveEnabled: boolean,
+  hookKey: string,
+  employerId: string,
+  planYearId: string
+): DataSourceResolution {
+  const base = decideDataSource(mode, liveEnabled, hookKey, employerId);
+  if (base !== "live") return base; // mock / fallback carry through unchanged
+  return isLiveId(planYearId) ? "live" : "mock"; // employer live but plan year not → mock
+}
+
+/** Env-bound plan-year-scoped resolver (what the hooks call). Reuses the employer-dim
+ *  warnings via resolveDataSource, then applies the plan-year live-id guard. */
+export function resolvePlanYearScopedSource(hookKey: string, employerId: string, planYearId: string): DataSourceResolution {
+  const base = resolveDataSource(hookKey, employerId);
+  if (base !== "live") return base;
+  return isLiveId(planYearId) ? "live" : "mock";
 }
 
 // --- Dev auth wiring ---------------------------------------------------------

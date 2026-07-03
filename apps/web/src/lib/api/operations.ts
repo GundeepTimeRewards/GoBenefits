@@ -5,7 +5,7 @@
 //
 // Field selections mirror the shapes the mock getters already return, so the eventual
 // hook swap is "call runOperation instead of getX()" with the same data shape. Kept in
-// one place so the 14 C1 operations stay in lockstep with the backend contract.
+// one place so the live operations stay in lockstep with the backend contract.
 import type { GraphQLClient } from "./client";
 
 export type OperationKind = "query" | "mutation";
@@ -92,6 +92,13 @@ const CURRENT_PLAN_YEAR = `query CurrentPlanYear($employerId: ID!) {
   currentPlanYear(employerId: $employerId) { id label year status periodStart periodEnd }
 }`;
 
+const PLAN_YEAR_SETUP_STATUS = `query PlanYearSetupStatus($employerId: ID!, $planYearId: ID!) {
+  planYearSetupStatus(employerId: $employerId, planYearId: $planYearId) {
+    employerId planYearId completionPct blockers
+    steps { key label description category requiredByDefault status route message }
+  }
+}`;
+
 const EMPLOYER_CENSUS_CONTEXT = `query EmployerCensusContext($employerId: ID!, $planYearId: ID!) {
   employerCensusContext(employerId: $employerId, planYearId: $planYearId) { employerId employerName planYearId planYearLabel totalEmployees activeEmployees missingRequiredCount missingEligibilityClassCount dependentsMissingDataCount needsReviewCount }
 }`;
@@ -142,6 +149,7 @@ export const operations = {
   employer: { name: "employer", kind: "query", document: EMPLOYER, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   planYears: { name: "planYears", kind: "query", document: PLAN_YEARS, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
   currentPlanYear: { name: "currentPlanYear", kind: "query", document: CURRENT_PLAN_YEAR, buildVariables: (a: EmployerArgs) => ({ employerId: a.employerId }) } as C1Operation<EmployerArgs, unknown>,
+  planYearSetupStatus: { name: "planYearSetupStatus", kind: "query", document: PLAN_YEAR_SETUP_STATUS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   employerCensusContext: { name: "employerCensusContext", kind: "query", document: EMPLOYER_CENSUS_CONTEXT, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   employees: { name: "employees", kind: "query", document: EMPLOYEES, buildVariables: (a: EmployeesArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, search: a.search, limit: a.limit, nextToken: a.nextToken }) } as C1Operation<EmployeesArgs, unknown>,
   employeeDetail: { name: "employeeDetail", kind: "query", document: EMPLOYEE_DETAIL, buildVariables: (a: EmployeeArgs) => ({ employerId: a.employerId, employeeId: a.employeeId }) } as C1Operation<EmployeeArgs, unknown>,
@@ -156,7 +164,7 @@ export const operations = {
 
 export type C1OperationName = keyof typeof operations;
 
-/** The 14 C1 operation names (queries + mutations). */
+/** Live-capable operation names (the C1 slice + Phase D-1 `planYearSetupStatus`). */
 export const C1_OPERATION_NAMES = Object.keys(operations) as C1OperationName[];
 
 /** Execute an operation against a client. Groundwork helper — no screen calls it yet. */

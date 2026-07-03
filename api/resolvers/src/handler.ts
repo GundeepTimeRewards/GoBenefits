@@ -64,6 +64,9 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return employerService.listPlanYears(ctx, a.employerId);
     case "currentPlanYear":
       return employerService.currentPlanYear(ctx, a.employerId);
+    // Plan Year Setup checklist (Phase D-1) — derived aggregate read model.
+    case "planYearSetupStatus":
+      return employerService.planYearSetupStatus(ctx, a.employerId, a.planYearId);
 
     // --- Census (Module 1) ---
     case "employees":

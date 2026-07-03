@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { usePlanYearSetupSteps } from "@/lib/api";
-import { readinessMeta, type ChecklistStep, type ReadinessStatus } from "@/lib/plan-year-checklist-mock";
+import { readinessMeta, summarizeChecklist, type ChecklistStep, type ReadinessStatus } from "@/lib/plan-year-checklist-mock";
 
 const statusIcon: Record<ReadinessStatus, React.ComponentType<{ className?: string }>> = {
   not_started: Circle,
@@ -16,25 +16,22 @@ const statusIcon: Record<ReadinessStatus, React.ComponentType<{ className?: stri
   not_applicable: MinusCircle,
 };
 
-function isDone(s: ReadinessStatus) {
-  return s === "complete" || s === "not_applicable";
-}
-
 /**
- * Derived-readiness setup checklist. Status is mock here; it is COMPUTED from the
- * real domain entities server-side later (see DATA_MODEL.md §10.1). Renders one
- * row per step with status, required/optional, action route, warnings, and the
- * admin-override note placeholder. (Navigation uses plain anchors for now — the
- * production router wiring is a TODO; see README.)
+ * Derived-readiness setup checklist. In live (hybrid) mode `completionPct` + `blockers`
+ * are COMPUTED SERVER-SIDE from real domain entities and rendered verbatim here; in mock
+ * mode they are summarized from the fixture. The FE never computes authoritative
+ * completion math for live data. Renders one row per step with status, required/optional,
+ * action route, warnings, and the admin-override note. A `steps` prop (tests/storybook)
+ * bypasses the hook and is summarized locally.
  */
 export function PlanYearChecklist({ steps }: { steps?: ChecklistStep[] }) {
   const employerId = useActiveEmployerId();
   const { planYearId } = useParams({ strict: false });
   const setup = usePlanYearSetupSteps(employerId, planYearId ?? "");
-  const resolved = steps ?? setup.data ?? [];
-  const required = resolved.filter((s) => s.requiredByDefault && s.status !== "not_applicable");
-  const requiredDone = required.filter((s) => isDone(s.status)).length;
-  const pct = required.length ? Math.round((requiredDone / required.length) * 100) : 0;
+  const view = steps ? summarizeChecklist(steps) : setup.data;
+  const resolved = view?.steps ?? [];
+  const completionPct = view?.completionPct ?? 0;
+  const blockers = view?.blockers ?? 0;
 
   return (
     <Card>
@@ -42,10 +39,10 @@ export function PlanYearChecklist({ steps }: { steps?: ChecklistStep[] }) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Plan Year Setup Checklist</CardTitle>
           <span className="text-xs text-muted-foreground">
-            {requiredDone}/{required.length} required complete
+            {completionPct}% complete{blockers > 0 ? ` · ${blockers} blocker${blockers === 1 ? "" : "s"}` : ""}
           </span>
         </div>
-        <Progress value={pct} className="mt-2 h-2" />
+        <Progress value={completionPct} className="mt-2 h-2" />
       </CardHeader>
       <CardContent className="space-y-1.5">
         {resolved.map((step) => {

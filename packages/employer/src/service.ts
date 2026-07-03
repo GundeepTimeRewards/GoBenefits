@@ -5,14 +5,38 @@
  * user, unauthorized/unknown/archived employer, or a missing permission fails closed
  * inside getCustomerDb — never in the repository.
  */
-import { getCustomerDb, type AuthContext } from "@goben/data-access";
+import { getCustomerDb, controlPlanePool, type AuthContext } from "@goben/data-access";
 import * as repo from "./plan-year-repository.js";
+import * as setupRepo from "./plan-year-setup-repository.js";
+import { deriveChecklist, type PlanYearSetupStatus } from "./plan-year-checklist.js";
 import type { Employer, PlanYear } from "./types.js";
 
 /** All plan years for an employer (top-bar plan-year selector + Plan Years overview). */
 export async function listPlanYears(ctx: AuthContext, employerId: string): Promise<PlanYear[]> {
   const { db } = await getCustomerDb(ctx, "plan_year.read", employerId);
   return repo.listPlanYears(db);
+}
+
+/**
+ * Plan Year Setup checklist (Phase D-1) — a DERIVED aggregate read model. Authorizes +
+ * routes exactly like the other plan-year reads (`plan_year.read`, fail-closed inside
+ * getCustomerDb), then combines the control-plane step catalog with per-plan-year
+ * overrides + current domain state. completionPct/blockers are computed server-side
+ * (see deriveChecklist). No new permission is introduced.
+ */
+export async function planYearSetupStatus(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string
+): Promise<PlanYearSetupStatus> {
+  const { db } = await getCustomerDb(ctx, "plan_year.read", employerId);
+  const cp = await controlPlanePool();
+  const [defs, overrides, domain] = await Promise.all([
+    setupRepo.listStepDefinitions(cp),
+    setupRepo.listStepOverrides(db, planYearId),
+    setupRepo.planYearSetupState(db, planYearId),
+  ]);
+  return deriveChecklist(employerId, planYearId, defs, overrides, domain);
 }
 
 /** The UI-default plan year for an employer (or null if none exists yet). */

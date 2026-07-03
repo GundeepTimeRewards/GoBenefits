@@ -34,6 +34,34 @@ export const readinessMeta: Record<ReadinessStatus, { label: string; tone: strin
   not_applicable: { label: "Not applicable", tone: "bg-muted text-muted-foreground border-border" },
 };
 
+/**
+ * Wrapped Plan Year Setup read model (mirrors GraphQL `PlanYearSetupStatus`). Both the
+ * mock and the live hook return this shape so the page consumes `completionPct`,
+ * `blockers`, and `steps` identically. In LIVE mode these numbers come from the server;
+ * in MOCK mode `summarizeChecklist` computes them from the fixture with the SAME formula
+ * the checklist has always used — so mock visuals are unchanged.
+ */
+export type PlanYearSetupView = {
+  completionPct: number;
+  blockers: number;
+  steps: ChecklistStep[];
+};
+
+/**
+ * Roll up mock/fixture steps into completion + blockers — for the NON-authoritative
+ * mock/fallback path only (live data already carries server-computed values). Mirrors
+ * the backend `deriveChecklist`: required, applicable (not N/A) steps; complete over
+ * required for the pct; blocked/needs_attention required steps as blockers.
+ */
+export function summarizeChecklist(steps: ChecklistStep[]): PlanYearSetupView {
+  const required = steps.filter((s) => s.requiredByDefault && s.status !== "not_applicable");
+  const completionPct = required.length
+    ? Math.round((100 * required.filter((s) => s.status === "complete").length) / required.length)
+    : 0;
+  const blockers = required.filter((s) => s.status === "blocked" || s.status === "needs_attention").length;
+  return { completionPct, blockers, steps };
+}
+
 const R = "/employers/$employerId";
 
 export const planYearChecklist: ChecklistStep[] = [
