@@ -783,7 +783,12 @@ type Mutation {
   generateQuote(input: GenerateQuoteInput!): Quote!
   generatePayrollDeductions(employerId: ID!, planYearId: ID!): JobHandle!   ## async (SQS)
 
-  ## --- FUTURE: Plan years (Phase D) — NOT IMPLEMENTED ---
+  ## --- Plan years (Phase D-5) — IMPLEMENTED ---
+  ## createPlanYear: empty year in `setup`; period defaults to the calendar year.
+  ## copyFromPriorYear: renewal copy-forward — deep-copies the source year's plans,
+  ##   options, and rates; copied plans return as drafts needing review; rate
+  ##   effective dates shift by the year delta. activatePlanYear enforces a single
+  ##   active year (any other active year is archived in the same transaction).
   createPlanYear(employerId: ID!, year: Int!, label: String!): PlanYear
   copyFromPriorYear(employerId: ID!, fromPlanYearId: ID!, toYear: Int!): PlanYear
   activatePlanYear(employerId: ID!, planYearId: ID!): PlanYear

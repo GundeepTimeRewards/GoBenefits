@@ -25,6 +25,7 @@ import {
   type EnrollmentCenter,
 } from "./enrollment.js";
 import { buildEmployerOverview, type EmployerOverview } from "./overview.js";
+import { ValidationError } from "./errors.js";
 import type { Employer, PlanYear } from "./types.js";
 
 /** All plan years for an employer (top-bar plan-year selector + Plan Years overview). */
@@ -53,6 +54,97 @@ export async function planYearSetupStatus(
     setupRepo.planYearSetupState(db, planYearId),
   ]);
   return deriveChecklist(employerId, planYearId, defs, overrides, domain);
+}
+
+/** Shared input guard for the plan-year mutations. */
+function validateYear(year: number): void {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new ValidationError(`Plan year must be a 4-digit year between 2000 and 2100 (got ${year})`);
+  }
+}
+
+/**
+ * Create an empty plan year in `setup` (Phase D-5). Authorizes on
+ * `plan_year.manage` (employer_admin + broker hold it since 0002), fail-closed
+ * inside getCustomerDb. Coverage period defaults to the calendar year — editable
+ * later via employer setup; the GraphQL signature intentionally carries only
+ * (year, label).
+ */
+export async function createPlanYear(
+  ctx: AuthContext,
+  employerId: string,
+  year: number,
+  label: string
+): Promise<PlanYear> {
+  const { db } = await getCustomerDb(ctx, "plan_year.manage", employerId);
+  validateYear(year);
+  const trimmed = label?.trim();
+  if (!trimmed) throw new ValidationError("Plan year label is required");
+  if (await repo.findPlanYearIdByYear(db, year)) {
+    throw new ValidationError(`A plan year for ${year} already exists`);
+  }
+  const id = await repo.insertPlanYear(db, {
+    label: trimmed,
+    year,
+    periodStart: `${year}-01-01`,
+    periodEnd: `${year}-12-31`,
+  });
+  return (await repo.getPlanYearById(db, id))!;
+}
+
+/**
+ * Renewal copy-forward (Phase D-5): create `toYear` from a prior plan year,
+ * deep-copying plans, options, and rates (see copyPlanYearDeep for the renewal
+ * semantics — copied plans come back as drafts needing review, rates shift their
+ * effective dates by the year delta). The label is derived from the source label
+ * with the year swapped (e.g. "PY 2026" → "PY 2027"), falling back to "PY <year>".
+ */
+export async function copyFromPriorYear(
+  ctx: AuthContext,
+  employerId: string,
+  fromPlanYearId: string,
+  toYear: number
+): Promise<PlanYear> {
+  const { db } = await getCustomerDb(ctx, "plan_year.manage", employerId);
+  validateYear(toYear);
+  const source = await repo.getPlanYearById(db, fromPlanYearId);
+  if (!source) throw new ValidationError("Source plan year not found for this employer");
+  if (await repo.findPlanYearIdByYear(db, toYear)) {
+    throw new ValidationError(`A plan year for ${toYear} already exists`);
+  }
+  const label = source.label.includes(String(source.year))
+    ? source.label.replaceAll(String(source.year), String(toYear))
+    : `PY ${toYear}`;
+  const id = await repo.copyPlanYearDeep(db, {
+    fromId: fromPlanYearId,
+    toYear,
+    label,
+    yearDelta: toYear - source.year,
+  });
+  return (await repo.getPlanYearById(db, id))!;
+}
+
+/**
+ * Activate a plan year (Phase D-5). Enforces the single-active invariant: any other
+ * active year is archived in the same transaction.
+ */
+export async function activatePlanYear(ctx: AuthContext, employerId: string, planYearId: string): Promise<PlanYear> {
+  const { db } = await getCustomerDb(ctx, "plan_year.manage", employerId);
+  if (!(await repo.getPlanYearById(db, planYearId))) {
+    throw new ValidationError("Plan year not found for this employer");
+  }
+  await repo.setPlanYearActive(db, planYearId);
+  return (await repo.getPlanYearById(db, planYearId))!;
+}
+
+/** Archive a plan year (Phase D-5). Archived years are read-only in the UI. */
+export async function archivePlanYear(ctx: AuthContext, employerId: string, planYearId: string): Promise<PlanYear> {
+  const { db } = await getCustomerDb(ctx, "plan_year.manage", employerId);
+  if (!(await repo.getPlanYearById(db, planYearId))) {
+    throw new ValidationError("Plan year not found for this employer");
+  }
+  await repo.setPlanYearArchived(db, planYearId);
+  return (await repo.getPlanYearById(db, planYearId))!;
 }
 
 /** The UI-default plan year for an employer (or null if none exists yet). */
