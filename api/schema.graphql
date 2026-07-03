@@ -43,9 +43,10 @@ enum LaunchState { not_launched launched closed archived }
 enum ConfigStatus { complete partial missing }
 enum ChecklistStatus { complete in_progress needs_attention not_started blocked not_applicable }
 
-## Generic result shapes for async / stubbed actions.
+## Generic result shapes for async / stubbed actions. ActionResult.id carries the
+## created/affected entity id when the action has one (e.g. addPlan → new plan id).
 type JobHandle { jobId: ID!  status: String! }
-type ActionResult { ok: Boolean!  message: String }
+type ActionResult { ok: Boolean!  message: String  id: ID }
 type RemoveResult { removed: Boolean! }
 
 ## --- Identity & org (control-plane) -----------------------------------------
@@ -794,11 +795,19 @@ type Mutation {
   activatePlanYear(employerId: ID!, planYearId: ID!): PlanYear
   archivePlanYear(employerId: ID!, planYearId: ID!): PlanYear
 
-  ## --- FUTURE: Plans & rates (Phase D) — NOT IMPLEMENTED ---
-  addPlan(employerId: ID!, planYearId: ID!, line: CoverageLine!, planName: String!): ActionResult
+  ## --- Plans & rates (Phase D-6) — IMPLEMENTED ---
+  ## addPlan: new draft plan for a line in a non-archived plan year (ActionResult.id = new plan id).
+  ## duplicatePlan: deep-copies a plan (options + rates) within its own plan year as a
+  ##   draft named "Copy of <name>" (ActionResult.id = new plan id).
+  ## importRates: REPLACES the plan's entire rate table with the given bands at one
+  ##   effective date (synchronous — rate tables are small; finalized from the Phase B
+  ##   JobHandle stub). Imported bands are plan-level (no plan_option link).
+  ## updateContributionRule: upserts the employer-level contribution rule (finalized from
+  ##   the Phase B per-plan stub — contributions are employer-level in the data model).
+  addPlan(employerId: ID!, planYearId: ID!, line: CoverageLine!, planName: String!, carrierName: String): ActionResult
   duplicatePlan(employerId: ID!, planId: ID!): ActionResult
-  importRates(employerId: ID!, planYearId: ID!): JobHandle
-  updateContributionRule(employerId: ID!, planId: ID!): ActionResult
+  importRates(employerId: ID!, planId: ID!, input: ImportRatesInput!): ActionResult
+  updateContributionRule(employerId: ID!, input: ContributionRuleInput!): ActionResult
 
   ## --- FUTURE: Enrollment (Phase D) — NOT IMPLEMENTED ---
   launchEnrollment(employerId: ID!, planYearId: ID!): EnrollmentCenter
@@ -844,6 +853,37 @@ type Mutation {
 }
 
 ## --- Inputs ------------------------------------------------------------------
+## One rate band for importRates: age = null for composite (non-age-banded) rates.
+## rateEe is required; missing tiers stay null (not offered).
+input RateBandInput {
+  age: Int
+  rateEe: Float!
+  rateEeSpouse: Float
+  rateEeChild: Float
+  rateFamily: Float
+}
+
+## importRates payload: replaces the plan's ENTIRE rate table with these bands,
+## all at one effective date.
+input ImportRatesInput {
+  effectiveDate: AWSDate!
+  rows: [RateBandInput!]!
+}
+
+## Employer-level contribution rule upsert (single-rule model, matching the
+## contribution_rule table + rate engine). Omitted fields keep their current value.
+input ContributionRuleInput {
+  name: String
+  displayName: String
+  pctEmployeeHealth: Float
+  pctEmployeeDental: Float
+  pctEmployeeVision: Float
+  pctDependentHealth: Float
+  pctDependentDental: Float
+  pctDependentVision: Float
+  fixedBasicLife: Float
+}
+
 input CreateEmployeeInput {
   employerId: ID!
   firstName: String!
