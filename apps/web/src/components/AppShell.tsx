@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { Link, Outlet, useRouterState, useParams } from "@tanstack/react-router";
 import { Building2, HeartPulse } from "lucide-react";
-import { useRole, roleLabels } from "@/lib/role-context";
+import { roleLabels } from "@/lib/role-context";
 import { useEmployer } from "@/lib/employer-context";
 import { getEmployerProfile, isKnownEmployer } from "@/lib/mock/db";
+import { useEmployer as useEmployerQuery } from "@/lib/api";
+import { DATA_SOURCE_MODE, isLiveId } from "@/lib/api/dataSource";
+import { useEffectiveRole, pickEmployerProfile } from "@/lib/live-identity";
 import { getPersonaNav, NAV_ITEMS, itemKey, itemLabel, type NavItemDef } from "@/lib/persona";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
 import { EmployerSwitcher } from "@/components/EmployerSwitcher";
@@ -47,7 +50,9 @@ const roleFace: Record<string, { name: string; initials: string }> = {
 
 export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { role } = useRole();
+  // C2-FE-5: nav role = live me.role in hybrid; mock switcher role otherwise.
+  const identity = useEffectiveRole();
+  const role = identity.role;
   const { selectedEmployerId, setSelectedEmployerId } = useEmployer();
   const { setSelectedPlanYearId } = usePlanYearCtx();
   const params = useParams({ strict: false });
@@ -55,17 +60,24 @@ export function AppShell() {
   const routePlanYearId = params.planYearId;
 
   // Keep the active employer + plan year in sync with the URL. Only sync a VALID
-  // employer id — a stale/undefined route param must never overwrite the context
-  // (that would make every keyed getter return [] and blank the whole app).
+  // employer id (mock slug in mock mode; live UUID in hybrid) — a stale/undefined
+  // route param must never overwrite the context (that would make every keyed
+  // getter return [] and blank the whole app).
+  const routeIdValid =
+    DATA_SOURCE_MODE === "mock" ? isKnownEmployer(routeEmployerId) : isLiveId(routeEmployerId);
   useEffect(() => {
-    if (isKnownEmployer(routeEmployerId) && routeEmployerId !== selectedEmployerId) setSelectedEmployerId(routeEmployerId!);
-  }, [routeEmployerId, selectedEmployerId, setSelectedEmployerId]);
+    if (routeIdValid && routeEmployerId !== selectedEmployerId) setSelectedEmployerId(routeEmployerId!);
+  }, [routeIdValid, routeEmployerId, selectedEmployerId, setSelectedEmployerId]);
   useEffect(() => {
     if (routePlanYearId) setSelectedPlanYearId(routePlanYearId);
   }, [routePlanYearId, setSelectedPlanYearId]);
 
   const persona = getPersonaNav(role);
-  const employer = getEmployerProfile(selectedEmployerId);
+  // Employer label/current-PY: prefer the live employer (C1 hook) when available;
+  // the mock profile keeps the mock-mode render identical (the hook returns the
+  // same mock profile there once resolved).
+  const liveEmployer = useEmployerQuery(selectedEmployerId).data;
+  const employer = pickEmployerProfile(liveEmployer, getEmployerProfile(selectedEmployerId));
   const currentPlanYearId = employer.currentPlanYearId;
 
   // Longest matching nav path wins — resolves parent/child overlaps (e.g. /agency vs
@@ -113,7 +125,9 @@ export function AppShell() {
         <div className="flex items-center gap-2.5 rounded-lg border border-sidebar-border bg-white/5 px-3 py-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-white">{face.initials}</span>
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-white">{face.name}</div>
+            <div className="truncate text-sm font-medium text-white">
+              {identity.source === "live" && identity.email ? identity.email : face.name}
+            </div>
             <div className="truncate text-[11px] text-sidebar-heading">{roleLabels[role]}</div>
           </div>
         </div>

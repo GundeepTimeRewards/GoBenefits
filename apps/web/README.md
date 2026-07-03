@@ -230,3 +230,37 @@ bun run dev
 
 Reset after mutating: `bun local/setup.ts`. Automated proof of the read + mutation paths:
 `bun run smoke:c1` and `SMOKE_MUTATIONS=true bun run smoke:c1`.
+
+## Live identity + role-aware nav (C2-FE-5)
+
+**Mock mode (default):** the "View as" **role switcher** works exactly as before — it is a
+mock persona filter (not auth) that drives `getPersonaNav` and the sidebar.
+
+**Hybrid mode:** the shell's role comes from the live **`me`** query instead:
+`me.role` (GraphQL enum) → persona role via `mapMeRoleToPersonaRole`:
+`super_admin`→platform_admin, `support`→platform_admin (nav-only; backend permissions
+still apply), `agency_admin`/`broker`/`employer_admin` map 1:1, `employee`→employee (the
+admin shell then falls back to the restricted employer_admin nav — self-service stays out
+of scope and is never auto-navigated). **Unsupported/missing roles fail safe to
+employer_admin** (most restricted admin nav). Nav is frontend-only; the backend enforces
+real permissions regardless.
+
+In hybrid the role switcher becomes a **read-only diagnostic chip** ("Role: … · live")
+because the role is determined by the backend identity; the sidebar face card shows the
+live `me.email`. In **hybrid-fallback** (endpoint/auth missing) the interactive switcher
+remains, consistent with everything else behaving like mock.
+
+**Testing seeded roles locally:** set `VITE_DEV_AUTH_SUB` in `apps/web/.env.local` and
+restart `bun run dev` (Vite env is build-time):
+```
+VITE_DEV_AUTH_SUB=sub-platform      # → Platform Admin nav (super_admin)
+VITE_DEV_AUTH_SUB=sub-support       # → Platform Admin nav (support; nav-only)
+VITE_DEV_AUTH_SUB=sub-agency        # → Agency Admin nav
+VITE_DEV_AUTH_SUB=sub-broker-a      # → Broker nav (Employer A book)
+VITE_DEV_AUTH_SUB=sub-emp-admin-a   # → Employer Admin nav (Employer A)
+```
+
+**Before deployed Cognito/AppSync:** the dev sub shim (`VITE_DEV_AUTH_SUB` →
+`x-dev-auth-sub`/Authorization → `event.identity.sub`) stands in for a real Cognito ID
+token. Once FOUNDATION-DEPLOY lands, `setAuthTokenProvider` supplies the Cognito token and
+`me` resolves from the real user — no shell changes needed.
