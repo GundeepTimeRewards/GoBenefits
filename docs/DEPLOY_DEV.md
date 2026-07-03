@@ -79,17 +79,21 @@ aws cognito-idp admin-set-user-password --user-pool-id "$UP" --username hr.a@dev
 SUB=$(aws cognito-idp admin-get-user --user-pool-id "$UP" --username hr.a@dev \
   --query 'UserAttributes[?Name==`sub`].Value' --output text); echo "$SUB"
 ```
-**Token for smoke tests:** the app client allows only `ALLOW_USER_SRP_AUTH`. Either use
-an SRP helper, or **temporarily** add `ALLOW_ADMIN_USER_PASSWORD_AUTH` to the dev client
-and:
+**Token for smoke tests:** use the **dev-only smoke-test client**
+(`DevTestUserPoolClientId` stack output; created only when `Env=dev` via the `IsDev`
+condition — staging/prod never create it). It allows `ADMIN_USER_PASSWORD_AUTH` so no SRP
+helper is needed. The **primary app client remains SRP-only** (production posture) — do
+not modify it for testing.
 ```bash
-aws cognito-idp admin-initiate-auth --user-pool-id "$UP" --client-id "$CLIENT" \
+DEV_CLIENT=<DevTestUserPoolClientId>   # from stack outputs (dev only)
+aws cognito-idp admin-initiate-auth --user-pool-id "$UP" --client-id "$DEV_CLIENT" \
   --auth-flow ADMIN_USER_PASSWORD_AUTH \
   --auth-parameters USERNAME=hr.a@dev,PASSWORD='Str0ng!Passw0rd' \
   --query 'AuthenticationResult.IdToken' --output text
-# Revert the temporary auth flow after testing.
 ```
-Use the **ID token** as the `Authorization` header below.
+Use the **ID token** as the `Authorization` header below. Note: the pool has
+**optional TOTP MFA** (`SOFTWARE_TOKEN_MFA`); test users that haven't enrolled an
+authenticator simply sign in with password only.
 
 ## 7. Seed identity + one plan year
 The handler maps `event.identity.sub → user_account.cognito_sub`, so seed a row with the
