@@ -15,9 +15,11 @@ import {
   buildPlanCatalog,
   buildPlanDetail,
   coverageLineOf,
+  benefitTypeKeyOf,
   type PlanCatalog,
   type BenefitPlanDetail,
 } from "./plan-catalog.js";
+import * as planMutRepo from "./plan-mutation-repository.js";
 import {
   buildEnrollmentProgress,
   buildEnrollmentCenter,
@@ -195,6 +197,135 @@ export async function benefitPlanDetail(
     catalogRepo.listEligibilityClasses(db),
   ]);
   return buildPlanDetail(plan, line, rates, rule, classes);
+}
+
+/** Shared shape of the ActionResult-returning Plans & Rates mutations. */
+export type ActionResult = { ok: boolean; message: string | null; id: string | null };
+
+/**
+ * Add a new draft plan to a plan year (Phase D-6). Authorizes on
+ * `benefit_plan.manage` (employer_admin co-granted in 0007; broker held it since
+ * 0002). Archived plan years are read-only — adding to one is a ValidationError.
+ */
+export async function addPlan(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  line: string,
+  planName: string,
+  carrierName?: string | null
+): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "benefit_plan.manage", employerId);
+  const name = planName?.trim();
+  if (!name) throw new ValidationError("Plan name is required");
+  const benefitTypeKey = benefitTypeKeyOf(line);
+  if (!benefitTypeKey) throw new ValidationError(`Unsupported coverage line: ${line}`);
+  const pyStatus = await planMutRepo.planYearStatus(db, planYearId);
+  if (!pyStatus) throw new ValidationError("Plan year not found for this employer");
+  if (pyStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  const id = await planMutRepo.insertPlan(db, {
+    planYearId,
+    benefitTypeKey,
+    planName: name,
+    carrierName: carrierName?.trim() || null,
+  });
+  return { ok: true, message: `Plan "${name}" created as draft`, id };
+}
+
+/**
+ * Duplicate a plan within its own plan year (Phase D-6): deep copy (options + rates)
+ * named "Copy of <name>", landing as a draft needing review. Same authorization as
+ * addPlan; duplicating into an archived year is a ValidationError.
+ */
+export async function duplicatePlan(ctx: AuthContext, employerId: string, planId: string): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "benefit_plan.manage", employerId);
+  const plan = await planMutRepo.getPlanMeta(db, planId);
+  if (!plan) throw new ValidationError("Plan not found for this employer");
+  if (plan.planYearStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  const newName = `Copy of ${plan.planName}`.slice(0, 255);
+  const id = await planMutRepo.duplicatePlanDeep(db, planId, newName);
+  return { ok: true, message: `Plan duplicated as "${newName}"`, id };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_RATE_ROWS = 500;
+
+/**
+ * Replace a plan's rate table (Phase D-6). Authorizes on `rate.manage`. The import
+ * is the new authoritative table (documented replace semantics — not a merge), all
+ * rows at one effective date, plan-level (no option link). Archived years read-only.
+ */
+export async function importRates(
+  ctx: AuthContext,
+  employerId: string,
+  planId: string,
+  input: { effectiveDate: string; rows: planMutRepo.RateBand[] }
+): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "rate.manage", employerId);
+  const plan = await planMutRepo.getPlanMeta(db, planId);
+  if (!plan) throw new ValidationError("Plan not found for this employer");
+  if (plan.planYearStatus === "archived") throw new ValidationError("Archived plan years are read-only");
+  if (!ISO_DATE.test(input.effectiveDate ?? "")) throw new ValidationError("effectiveDate must be YYYY-MM-DD");
+  const rows = input.rows ?? [];
+  if (rows.length === 0) throw new ValidationError("At least one rate row is required");
+  if (rows.length > MAX_RATE_ROWS) throw new ValidationError(`At most ${MAX_RATE_ROWS} rate rows per import`);
+  const seenAges = new Set<string>();
+  for (const [i, r] of rows.entries()) {
+    if (r.age != null && (!Number.isInteger(r.age) || r.age < 0 || r.age > 120)) {
+      throw new ValidationError(`Row ${i + 1}: age must be an integer between 0 and 120`);
+    }
+    const ageKey = r.age == null ? "composite" : String(r.age);
+    if (seenAges.has(ageKey)) {
+      throw new ValidationError(`Row ${i + 1}: duplicate ${r.age == null ? "composite row" : `age band ${r.age}`}`);
+    }
+    seenAges.add(ageKey);
+    for (const [tier, v] of [["rateEe", r.rateEe], ["rateEeSpouse", r.rateEeSpouse], ["rateEeChild", r.rateEeChild], ["rateFamily", r.rateFamily]] as const) {
+      if (tier === "rateEe" ? typeof v !== "number" || v < 0 : v != null && (typeof v !== "number" || v < 0)) {
+        throw new ValidationError(`Row ${i + 1}: ${tier} must be a non-negative number`);
+      }
+    }
+  }
+  // Normalize optional tiers to explicit nulls for the named-placeholder insert.
+  const bands: planMutRepo.RateBand[] = rows.map((r) => ({
+    age: r.age ?? null,
+    rateEe: r.rateEe,
+    rateEeSpouse: r.rateEeSpouse ?? null,
+    rateEeChild: r.rateEeChild ?? null,
+    rateFamily: r.rateFamily ?? null,
+  }));
+  await planMutRepo.replacePlanRates(db, planId, input.effectiveDate, bands);
+  return { ok: true, message: `${bands.length} rate row(s) imported (replaced prior table)`, id: planId };
+}
+
+/**
+ * Upsert the employer-level contribution rule (Phase D-6). Authorizes on
+ * `contribution.manage`. Percentages are 0–100 (the explicit-% model from the
+ * golden-master rate engine); omitted fields keep their current values.
+ */
+export async function updateContributionRule(
+  ctx: AuthContext,
+  employerId: string,
+  input: planMutRepo.ContributionRulePatch
+): Promise<ActionResult> {
+  const { db } = await getCustomerDb(ctx, "contribution.manage", employerId);
+  if (input.name !== undefined && !input.name?.trim()) throw new ValidationError("Rule name cannot be blank");
+  for (const field of [
+    "pctEmployeeHealth", "pctEmployeeDental", "pctEmployeeVision",
+    "pctDependentHealth", "pctDependentDental", "pctDependentVision",
+  ] as const) {
+    const v = input[field];
+    if (v !== undefined && (typeof v !== "number" || v < 0 || v > 100)) {
+      throw new ValidationError(`${field} must be between 0 and 100`);
+    }
+  }
+  if (input.fixedBasicLife !== undefined && input.fixedBasicLife != null && input.fixedBasicLife < 0) {
+    throw new ValidationError("fixedBasicLife must be non-negative");
+  }
+  const id = await planMutRepo.upsertContributionRule(db, {
+    ...input,
+    name: input.name?.trim(),
+  });
+  return { ok: true, message: "Contribution rule updated", id };
 }
 
 /** Plan-year status for the routed customer DB (small helper; null if not found). */

@@ -85,6 +85,16 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return employerService.planCatalog(ctx, a.employerId, a.planYearId);
     case "benefitPlanDetail":
       return employerService.benefitPlanDetail(ctx, a.employerId, a.planYearId, a.planId);
+    // Plans & Rates mutations (Phase D-6) — add / duplicate on benefit_plan.manage,
+    // rate-table replace on rate.manage, contribution upsert on contribution.manage.
+    case "addPlan":
+      return employerService.addPlan(ctx, a.employerId, a.planYearId, a.line, a.planName, a.carrierName);
+    case "duplicatePlan":
+      return employerService.duplicatePlan(ctx, a.employerId, a.planId);
+    case "importRates":
+      return employerService.importRates(ctx, a.employerId, a.planId, a.input);
+    case "updateContributionRule":
+      return employerService.updateContributionRule(ctx, a.employerId, a.input);
     // Enrollment Center / Progress (Phase D-3) — server-computed, read-only.
     case "enrollmentProgress":
       return employerService.enrollmentProgress(ctx, a.employerId, a.planYearId);

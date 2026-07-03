@@ -90,6 +90,15 @@ export function coverageLineOf(benefitTypeKey: string): string | null {
   return COVERAGE_LINE_BY_KEY[benefitTypeKey] ?? null;
 }
 
+const KEY_BY_COVERAGE_LINE: Record<string, string> = Object.fromEntries(
+  Object.entries(COVERAGE_LINE_BY_KEY).map(([key, line]) => [line, key])
+);
+
+/** Reverse map: CoverageLine enum value → benefit_type key (null for unknown lines). */
+export function benefitTypeKeyOf(line: string): string | null {
+  return KEY_BY_COVERAGE_LINE[line] ?? null;
+}
+
 /** Health lines whose employer/employee split comes from contribution_rule health %. */
 const HEALTH_LINES = new Set(["medical", "rx"]);
 
