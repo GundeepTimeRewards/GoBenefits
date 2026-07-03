@@ -92,3 +92,44 @@ INSERT INTO plan_rate (id, benefit_plan_id, plan_option_id, age,
    UUID_TO_BIN('c4440000-0000-0000-0000-000000000002'), NULL, 38.00, 72.00, 68.00, 110.00, '2026-01-01')
 ON DUPLICATE KEY UPDATE rate_ee = VALUES(rate_ee), rate_family = VALUES(rate_family),
   effective_date = VALUES(effective_date);
+
+-- ===========================================================================
+-- Phase D-3 Enrollment fixtures (Employer A, active PY 2026 only). Minimal by design:
+-- one open-enrollment event + window (window_end far in the future so it reads
+-- "launched"/open), invitations for 3 of the 4 employees (leaves 1 not-invited), a few
+-- elections (2 employees submitted, 1 in progress), and one waiver — enough to demo
+-- enrollmentProgress / enrollmentCenter live and to light up the enrollment checklist
+-- steps. Idempotent (fixed UUIDs / unique keys). Employer B stays empty.
+-- ===========================================================================
+
+-- Open-enrollment event + window for PY 2026.
+INSERT INTO enrollment_event (id, plan_year_id, type, name, effective_date) VALUES
+  (UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), UUID_TO_BIN('a2220000-0000-0000-0000-000000000002'),
+   'open_enrollment', '2026 Open Enrollment', '2026-01-01')
+ON DUPLICATE KEY UPDATE name = VALUES(name), effective_date = VALUES(effective_date);
+
+INSERT INTO enrollment_window (id, enrollment_event_id, window_start, window_end) VALUES
+  (UUID_TO_BIN('e2220000-0000-0000-0000-000000000001'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'),
+   '2025-11-01', '2030-12-31')
+ON DUPLICATE KEY UPDATE window_start = VALUES(window_start), window_end = VALUES(window_end);
+
+-- Invitations: Alice/Aaron/Amara invited; Andre (…0004) NOT invited → notInvited = 1.
+INSERT INTO enrollment_invitation (id, employee_id, enrollment_event_id, status, sent_at) VALUES
+  (UUID_TO_BIN('e3330000-0000-0000-0000-000000000001'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000001'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'completed', '2025-11-02 09:00:00'),
+  (UUID_TO_BIN('e3330000-0000-0000-0000-000000000002'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000002'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'opened',    '2025-11-02 09:00:00'),
+  (UUID_TO_BIN('e3330000-0000-0000-0000-000000000003'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000003'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'sent',      '2025-11-02 09:00:00')
+ON DUPLICATE KEY UPDATE status = VALUES(status), sent_at = VALUES(sent_at);
+
+-- Elections: Alice (medical family + dental ee) submitted; Aaron (medical ee) submitted;
+-- Amara (medical ee) in_progress. → submitted employees = 2, in progress = 1.
+INSERT INTO employee_election (id, employee_id, benefit_plan_id, plan_option_id, enrollment_event_id, coverage_tier, status, effective_date, submitted_at) VALUES
+  (UUID_TO_BIN('e4440000-0000-0000-0000-000000000001'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000001'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'), UUID_TO_BIN('c4440000-0000-0000-0000-000000000001'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'family', 'submitted', '2026-01-01', '2025-11-05 10:00:00'),
+  (UUID_TO_BIN('e4440000-0000-0000-0000-000000000002'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000001'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000002'), UUID_TO_BIN('c4440000-0000-0000-0000-000000000002'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'ee',     'submitted', '2026-01-01', '2025-11-05 10:00:00'),
+  (UUID_TO_BIN('e4440000-0000-0000-0000-000000000003'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000002'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'), UUID_TO_BIN('c4440000-0000-0000-0000-000000000001'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'ee',     'submitted', '2026-01-01', '2025-11-06 11:00:00'),
+  (UUID_TO_BIN('e4440000-0000-0000-0000-000000000004'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000003'), UUID_TO_BIN('c3330000-0000-0000-0000-000000000001'), UUID_TO_BIN('c4440000-0000-0000-0000-000000000001'), UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'ee',     'in_progress', NULL, NULL)
+ON DUPLICATE KEY UPDATE status = VALUES(status), coverage_tier = VALUES(coverage_tier);
+
+-- One waiver (Aaron waives dental) → lights up the waivers_reviewed checklist step.
+INSERT INTO waiver (id, employee_id, benefit_type_key, enrollment_event_id, reason, waived_at) VALUES
+  (UUID_TO_BIN('e5550000-0000-0000-0000-000000000001'), UUID_TO_BIN('a1110000-0000-0000-0000-000000000002'), 'dental', UUID_TO_BIN('e1110000-0000-0000-0000-000000000001'), 'Covered elsewhere', '2025-11-06 11:05:00')
+ON DUPLICATE KEY UPDATE reason = VALUES(reason);

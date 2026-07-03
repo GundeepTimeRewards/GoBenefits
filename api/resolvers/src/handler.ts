@@ -72,6 +72,11 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
       return employerService.planCatalog(ctx, a.employerId, a.planYearId);
     case "benefitPlanDetail":
       return employerService.benefitPlanDetail(ctx, a.employerId, a.planYearId, a.planId);
+    // Enrollment Center / Progress (Phase D-3) — server-computed, read-only.
+    case "enrollmentProgress":
+      return employerService.enrollmentProgress(ctx, a.employerId, a.planYearId);
+    case "enrollmentCenter":
+      return employerService.enrollmentCenter(ctx, a.employerId, a.planYearId);
 
     // --- Census (Module 1) ---
     case "employees":

@@ -147,7 +147,7 @@ function OeStat({ label, value, accent }: { label: string; value: number; accent
 
 // Live open-enrollment experience for Employer Admin (mock data).
 function OpenEnrollmentDashboard({ employerId, employerName, py }: { employerId: string; employerName: string; py: PlanYearRow }) {
-  const { data: en } = useEnrollmentProgress(employerId);
+  const { data: en } = useEnrollmentProgress(employerId, py.id);
   const { data: oe } = useOpenEnrollmentDashboard(employerId);
   if (!en || !oe) return <LoadingCard label="Loading dashboard…" />;
 

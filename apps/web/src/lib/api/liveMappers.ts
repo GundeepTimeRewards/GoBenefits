@@ -6,6 +6,7 @@ import type {
   EmployerProfile, PlanYearRow,
   PlanCatalog, PlanCatalogRow, BenefitPlanDetail,
   PlanBenefitRow, PlanRateRow, PlanContribRow, PlanEligRow, PlanDocRow,
+  EnrollmentSummary,
 } from "@/lib/mock/db";
 import type { CensusEmployee, EmployerCensusContext, EmployeeDetail, Dependent } from "@/lib/census-mock";
 import type { ChecklistStep, ReadinessStatus, PlanYearSetupView } from "@/lib/plan-year-checklist-mock";
@@ -166,6 +167,32 @@ export function mapBenefitPlanDetail(v: LiveBenefitPlanDetail): BenefitPlanDetai
     enrolled: v.enrolled ?? 0, status: v.status ?? "", effective: v.effective ?? "", setupIssues: [],
     type: displayLine(v.line), network: v.network ?? "", fundingType: v.fundingType ?? "", renewalDate: v.renewalDate ?? "",
     benefits: v.benefits, rates: v.rates, contributions: v.contributions, eligibility: v.eligibility, documents: v.documents,
+  };
+}
+
+// --- Enrollment Progress (Phase D-3) ----------------------------------------
+// GraphQL `EnrollmentProgress` is flatter than the mock `EnrollmentSummary`; the page
+// (EnrollmentProgressPage) only reads status/submitted/inProgress/notStarted/notInvited/
+// byCoverage — a 1:1 with the live shape. eventLabel/window/invited are not in the SDL
+// EnrollmentProgress (no schema change), so they get derived/placeholder values the page
+// doesn't render: invited = submitted+inProgress+notStarted.
+export type LiveEnrollmentProgress = {
+  employerId: string; planYearId: string; status: string;
+  submitted: number; inProgress: number; notStarted: number; notInvited: number;
+  byCoverage: { name: string; elected: number; waived: number; pending: number }[];
+};
+
+export function mapEnrollmentProgress(v: LiveEnrollmentProgress): EnrollmentSummary {
+  return {
+    eventLabel: "", // not in the SDL EnrollmentProgress; the progress page doesn't render it
+    window: "",
+    status: v.status,
+    invited: v.submitted + v.inProgress + v.notStarted,
+    notInvited: v.notInvited,
+    notStarted: v.notStarted,
+    inProgress: v.inProgress,
+    submitted: v.submitted,
+    byCoverage: v.byCoverage,
   };
 }
 

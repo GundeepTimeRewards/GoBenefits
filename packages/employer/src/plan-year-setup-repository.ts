@@ -87,6 +87,21 @@ export async function planYearSetupState(db: Pool, planYearId: string): Promise<
   const p = (planRows as any[])[0] ?? {};
   const [ruleRows] = await db.query(`SELECT COUNT(*) AS n FROM contribution_rule`);
 
+  // D-3 counts: scoped to the plan year's open-enrollment event(s).
+  const [enrRows] = await db.query(
+    `SELECT
+        (SELECT COUNT(*) FROM enrollment_window w JOIN enrollment_event e ON e.id = w.enrollment_event_id
+           WHERE e.plan_year_id = UUID_TO_BIN(:planYearId)) AS windowCount,
+        (SELECT COUNT(*) FROM enrollment_invitation i JOIN enrollment_event e ON e.id = i.enrollment_event_id
+           WHERE e.plan_year_id = UUID_TO_BIN(:planYearId) AND i.status IN ('sent','opened','completed')) AS invitationSentCount,
+        (SELECT COUNT(*) FROM employee_election ee JOIN enrollment_event e ON e.id = ee.enrollment_event_id
+           WHERE e.plan_year_id = UUID_TO_BIN(:planYearId) AND ee.status IN ('submitted','approved')) AS submittedElectionCount,
+        (SELECT COUNT(*) FROM waiver wv JOIN enrollment_event e ON e.id = wv.enrollment_event_id
+           WHERE e.plan_year_id = UUID_TO_BIN(:planYearId)) AS waiverCount`,
+    { planYearId }
+  );
+  const en = (enrRows as any[])[0] ?? {};
+
   return {
     planYearExists: Boolean(py),
     planYearStatus: py?.status ?? null,
@@ -96,5 +111,9 @@ export async function planYearSetupState(db: Pool, planYearId: string): Promise<
     rateCount: Number(p.rateCount ?? 0),
     contributionRuleCount: Number((ruleRows as any[])[0].n),
     optionCount: Number(p.optionCount ?? 0),
+    windowCount: Number(en.windowCount ?? 0),
+    invitationSentCount: Number(en.invitationSentCount ?? 0),
+    submittedElectionCount: Number(en.submittedElectionCount ?? 0),
+    waiverCount: Number(en.waiverCount ?? 0),
   };
 }
