@@ -15,6 +15,9 @@ import {
   type UpdateDependentInput,
   type CreatePlanYearArgs,
   type CopyFromPriorYearArgs,
+  type AddPlanArgs,
+  type ImportRatesArgs,
+  type ContributionRuleInput,
 } from "./operations";
 
 export type MutationErrorType = "validation" | "unauthorized" | "error";
@@ -189,6 +192,71 @@ export function useArchivePlanYear(employerId: string) {
     },
     onSuccess: (res) => {
       if (res.live) return invalidate(PLAN_YEAR_READS);
+    },
+  });
+}
+
+// --- Plans & Rates mutations (Phase D-6) ---------------------------------------
+// Invalidate every read whose payload shows plan/rate/contribution state: the
+// catalog + plan detail, the setup checklist + overview (plan readiness feeds
+// them), and planYears (planCount on the cards).
+const PLAN_CATALOG_READS = ["planCatalog", "benefitPlanDetail", "planYearSetup", "employerOverview", "planYears"];
+
+/** ActionResult payload shape shared by the Plans & Rates mutations. */
+export type ActionResultData = { ok: boolean; message: string | null; id: string | null };
+
+export function useAddPlan(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, Omit<AddPlanArgs, "employerId">>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("addPlan", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.addPlan, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_CATALOG_READS);
+    },
+  });
+}
+
+export function useDuplicatePlan(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, { planId: string }>({
+    mutationFn: async ({ planId }) => {
+      if (resolveDataSource("duplicatePlan", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.duplicatePlan, { employerId, planId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_CATALOG_READS);
+    },
+  });
+}
+
+export function useImportRates(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, Omit<ImportRatesArgs, "employerId">>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("importRates", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.importRates, { ...args, employerId }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_CATALOG_READS);
+    },
+  });
+}
+
+export function useUpdateContributionRule(employerId: string) {
+  const invalidate = useInvalidate();
+  return useMutation<MutationResult<unknown>, FormMutationError, ContributionRuleInput>({
+    mutationFn: async (input) => {
+      if (resolveDataSource("updateContributionRule", employerId) !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.updateContributionRule, { employerId, input }));
+      return { live: true, data };
+    },
+    onSuccess: (res) => {
+      if (res.live) return invalidate(PLAN_CATALOG_READS);
     },
   });
 }

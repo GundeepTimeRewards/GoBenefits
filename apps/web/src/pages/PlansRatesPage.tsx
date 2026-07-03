@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import {
-  Plus, Upload, Copy, Eye, CheckCircle2, AlertCircle, AlertTriangle, ChevronDown, ChevronRight,
+  Plus, Eye, CheckCircle2, AlertCircle, AlertTriangle, ChevronDown, ChevronRight,
   ArrowLeft, FileText, DollarSign, Edit, FolderUp, ShieldCheck, Layers,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader, StatusPill, LoadingCard } from "@/components/common";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
-import { useEmployer, useBenefitPlanDetail, usePlanCatalog } from "@/lib/api";
+import { useEmployer, useBenefitPlanDetail, usePlanCatalog, usePlanYears } from "@/lib/api";
+import { AddPlanForm, ImportRatesForm, ContributionRuleForm, DuplicatePlanButton } from "@/components/plans/PlanMutationForms";
+import { CopyFromPriorYearForm } from "@/components/plan-years/PlanYearForms";
 import { PLAN_CATEGORIES, type BenefitPlanRow, type PlanCatalogRow } from "@/lib/mock/db";
 
 const TONE: Record<string, string> = {
@@ -53,6 +55,7 @@ export function PlansRatesPage() {
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
   const { data: catalog } = usePlanCatalog(employerId, planYearId);
+  const { data: years = [] } = usePlanYears(employerId);
   const [cat, setCat] = useState<string>("All");
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -70,10 +73,10 @@ export function PlansRatesPage() {
         subtitle="Configure benefit plans, coverage tiers, rates, and employer contributions for the selected plan year."
         actions={readOnly ? undefined : (
           <>
-            <Button variant="outline" size="sm"><Plus className="mr-1.5 h-4 w-4" />Add Plan</Button>
-            <Button variant="outline" size="sm"><Copy className="mr-1.5 h-4 w-4" />Copy From Prior Year</Button>
-            <Button variant="outline" size="sm"><Upload className="mr-1.5 h-4 w-4" />Import Rates</Button>
-            <Button variant="ghost" size="sm">More</Button>
+            <AddPlanForm employerId={employerId} planYearId={planYearId} />
+            <CopyFromPriorYearForm employerId={employerId} years={years} />
+            <ImportRatesForm employerId={employerId} plans={catalog.rows.map((r) => ({ id: r.id, name: r.name }))} />
+            <ContributionRuleForm employerId={employerId} />
           </>
         )}
       />
@@ -243,6 +246,7 @@ function PlanRowDetail({ employerId, row }: { employerId: string; row: PlanCatal
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Layers className="h-3.5 w-3.5" /> Carrier export mapping: {row.documentStatus === "Missing" ? "Pending" : "Ready"} · Enrollment display: {row.status === "Ready" ? "Visible to employees" : "Hidden until ready"}
         </div>
+        <DuplicatePlanButton employerId={employerId} planId={row.id} />
       </div>
     </div>
   );
