@@ -70,6 +70,11 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "openElectionWindow",
   "documentWorkspace", // Phase E-3 (plan-year-scoped read)
   "generateConfirmations",
+  "complianceWorkspace", // Phase F-4 (plan-year-scoped read: ACA/COBRA/notices)
+  "calculateAleStatus",
+  "generate1095c",
+  "createCobraEvent",
+  "generateCobraNotice",
   "electionReview", // Phase E-1 (plan-year-scoped read)
   "approveElection",
   "sendBackElection",

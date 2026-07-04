@@ -66,11 +66,11 @@ describe("COBRA event lifecycle (TPA scope — no premium collection)", () => {
     expect(cobra.payments).toEqual([]);
     // Alice + dependent Ade are qualified beneficiaries (containment, not an exact
     // list — local runs accumulate extra test dependents on Alice).
-    const people = cobra.beneficiaries.map((b) => b.person);
+    const people = cobra.beneficiaries.map((b) => b.name);
     expect(people).toContain("Alice Anderson");
     expect(people).toContain("Ade Anderson");
-    expect(cobra.beneficiaries.find((b) => b.person === "Alice Anderson")!.relationship).toBe("employee");
-    expect(cobra.beneficiaries.find((b) => b.person === "Ade Anderson")!.relationship).toBe("child");
+    expect(cobra.beneficiaries.find((b) => b.name === "Alice Anderson")!.relationship).toBe("employee");
+    expect(cobra.beneficiaries.find((b) => b.name === "Ade Anderson")!.relationship).toBe("child");
   });
 
   test("election notice: metadata-first document + 60-day window; then the decision lands", async () => {

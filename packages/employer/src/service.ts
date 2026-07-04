@@ -1091,7 +1091,8 @@ export type CobraCompliance = {
   overdueNotices: number;
   paymentIssues: number;
   events: CobraEventView[];
-  beneficiaries: { person: string; relationship: string | null; event: string; status: string }[];
+  // `name` matches the GraphQL CobraBeneficiary type (not `person`).
+  beneficiaries: { name: string; relationship: string | null; event: string; coverage: string | null; status: string }[];
   payments: never[];
 };
 
@@ -1147,9 +1148,10 @@ export async function cobraCompliance(ctx: AuthContext, employerId: string): Pro
     beneficiaries: beneficiaries.map((b) => {
       const ev = eventById.get(b.eventId);
       return {
-        person: b.person,
+        name: b.person,
         relationship: b.relationship,
         event: ev ? `${COBRA_EVENT_LABEL[ev.eventType] ?? ev.eventType} · ${ev.eventDate}` : "—",
+        coverage: ev?.coverage ?? null,
         status: ev?.status ?? "—",
       };
     }),

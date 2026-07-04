@@ -5,7 +5,7 @@ import type { GraphQLClient } from "./client";
 
 describe("C1 operation registry", () => {
   test("exposes the C1 operations + Phase D reads/mutations + E-1 elections review", () => {
-    expect(C1_OPERATION_NAMES.length).toBe(48);
+    expect(C1_OPERATION_NAMES.length).toBe(53);
     for (const name of [
       "me", "myEmployers", "employer", "employerOverview", "planYears", "currentPlanYear", "planYearSetupStatus",
       "planCatalog", "benefitPlanDetail", "enrollmentProgress", "enrollmentCenter", "employerCensusContext",
@@ -18,15 +18,16 @@ describe("C1 operation registry", () => {
       "deductionsWorkspace", "mapDeductionCode", "exportReadyDeductions", "reconcileBatch",
       "lifeEventQueue", "approveLifeEvent", "denyLifeEvent", "requestLifeEventDocs", "openElectionWindow",
       "documentWorkspace", "generateConfirmations",
+      "complianceWorkspace", "calculateAleStatus", "generate1095c", "createCobraEvent", "generateCobraNotice",
     ]) {
       expect(C1_OPERATION_NAMES).toContain(name as any);
     }
   });
 
-  test("kinds are correct (19 queries, 29 mutations)", () => {
+  test("kinds are correct (20 queries, 33 mutations)", () => {
     const kinds = C1_OPERATION_NAMES.map((n) => operations[n].kind);
-    expect(kinds.filter((k) => k === "query").length).toBe(19);
-    expect(kinds.filter((k) => k === "mutation").length).toBe(29);
+    expect(kinds.filter((k) => k === "query").length).toBe(20);
+    expect(kinds.filter((k) => k === "mutation").length).toBe(33);
   });
 
   test("benefitPlanDetail builds employerId + planYearId + planId variables", () => {

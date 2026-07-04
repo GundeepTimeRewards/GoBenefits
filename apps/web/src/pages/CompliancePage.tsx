@@ -13,8 +13,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusPill, LoadingCard } from "@/components/common";
 import { useRole } from "@/lib/role-context";
 import { useActiveEmployerId } from "@/lib/employer-context";
-import { useActivePlanYear } from "@/lib/plan-year-context";
+import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useEmployer } from "@/lib/api";
+import { useComplianceWorkspace } from "@/lib/api/complianceHooks";
+import { useCalculateAleStatus, useGenerate1095c } from "@/lib/api/mutationHooks";
 
 type Icon = ComponentType<{ className?: string }>;
 type Tone = "success" | "warning" | "info" | "danger" | "muted" | "teal";
@@ -60,7 +62,7 @@ const FORMS: { employee: string; aca: string; line14: string; line16: string; mo
   { employee: "Maria Patel", aca: "Full-Time", line14: "1E", line16: "2C", months: "12", status: "Ready", issues: "No issues" },
   { employee: "Sarah Mitchell", aca: "Full-Time", line14: "1E", line16: "2C", months: "12", status: "Corrected", issues: "Address corrected" },
 ];
-const formTone: Record<FormStatus, Tone> = { Ready: "success", "Needs Review": "warning", "Missing Data": "danger", Corrected: "teal" };
+const formTone: Record<string, Tone> = { Ready: "success", "Needs Review": "warning", "Missing Data": "danger", Corrected: "teal", Generated: "success", Draft: "muted" };
 
 type MStatus = "Ready" | "Missing Data";
 const ALE_MONTHS: { month: string; ft: number; ptHours: string; fte: string; total: string; status: MStatus }[] = [
@@ -119,6 +121,9 @@ const NOTICES: { type: string; audience: string; due: string; delivery: string; 
 ];
 const noticeTone: Record<string, Tone> = { "Action Needed": "warning", Sent: "success", Active: "info", Pending: "muted", Overdue: "danger" };
 
+// Live overview cards carry an iconKey string (icons aren't serializable) → component.
+const OVERVIEW_ICONS: Record<string, Icon> = { shield: ShieldCheck, users: Users, file: FileCheck2, bar: FileBarChart, bell: Bell };
+
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "aca", label: "ACA / ALE" },
@@ -134,23 +139,40 @@ function KV({ k, v, tone }: { k: string; v: React.ReactNode; tone?: string }) {
 export function CompliancePage() {
   const { role } = useRole();
   const employerId = useActiveEmployerId();
+  const planYearId = useActivePlanYearId();
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
+  const { data: ws } = useComplianceWorkspace(employerId, planYearId);
+  const calcAle = useCalculateAleStatus(employerId);
+  const gen1095 = useGenerate1095c(employerId);
   const [tab, setTab] = useState<TabKey>("overview");
   const [acaView, setAcaView] = useState<"fte" | "forms" | "afford">("fte");
   const [cobraView, setCobraView] = useState<"events" | "beneficiaries" | "payments">("events");
 
+  // Live workspace (F-4) when available; otherwise the representative mock constants.
+  const overviewCards = ws ? ws.overview.map((c) => ({ ...c, icon: OVERVIEW_ICONS[c.iconKey] ?? ShieldCheck })) : OVERVIEW;
+  const needsAttentionRows = ws ? ws.needsAttention : NEEDS_ATTENTION;
+  const deadlineRows = ws ? ws.deadlines : DEADLINES;
+  const readinessIssueRows = ws ? ws.readinessIssues : READINESS_ISSUES;
+  const aleMonthRows = ws ? ws.aleMonths : ALE_MONTHS;
+  const affordRows = ws ? ws.affordRows : AFFORD_ROWS;
+  const formRows = ws ? ws.forms : FORMS;
+  const cobraEventRows = ws ? ws.cobraEvents : COBRA_EVENTS;
+  const cobraBeneficiaryRows = ws ? ws.cobraBeneficiaries : COBRA_BENEFICIARIES;
+  const noticeRows = ws ? ws.notices : NOTICES;
+  const complianceYear = py?.label?.match(/\d{4}/)?.[0] ?? "2026";
+
   const sortedForms = useMemo(() => {
-    const rank: Record<FormStatus, number> = { "Missing Data": 0, "Needs Review": 1, Corrected: 2, Ready: 3 };
-    return [...FORMS].sort((a, b) => rank[a.status] - rank[b.status]);
-  }, []);
+    const rank: Record<string, number> = { "Missing Data": 0, "Needs Review": 1, Corrected: 2, Generated: 2, Ready: 3, Draft: 1 };
+    return [...formRows].sort((a, b) => (rank[a.status] ?? 1) - (rank[b.status] ?? 1));
+  }, [formRows]);
 
   if (!employer || !py) return <LoadingCard label="Loading compliance…" />;
 
   // Broker/agency see a limited summary only — no payroll-level detail, Overview only.
   const brokerView = role === "broker" || role === "agency_admin";
   const tabs = brokerView ? TABS.filter((t) => t.key === "overview") : TABS;
-  const attention = (brokerView ? NEEDS_ATTENTION.filter((a) => !a.payroll) : NEEDS_ATTENTION);
+  const attention = (brokerView ? needsAttentionRows.filter((a) => !a.payroll) : needsAttentionRows);
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
@@ -160,7 +182,7 @@ export function CompliancePage() {
           <div className="flex flex-wrap items-center gap-2">
             <FileCheck2 className="h-5 w-5 text-primary" />
             <h1 className="text-[1.55rem] font-semibold leading-tight tracking-tight text-foreground">Compliance</h1>
-            <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Compliance Year: 2026</Badge>
+            <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Compliance Year: {complianceYear}</Badge>
             {!brokerView && <StatusPill label="Filing Status: In Preparation" tone="warning" />}
           </div>
           <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">ACA / ALE, 1095-C filing, COBRA administration, and compliance notices for the selected plan year.</p>
@@ -168,9 +190,15 @@ export function CompliancePage() {
         </div>
         {!brokerView && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm"><AlertTriangle className="mr-1.5 h-4 w-4" />Review ACA Issues</Button>
-            <Button variant="outline" size="sm"><FileCheck2 className="mr-1.5 h-4 w-4" />Generate 1095-C</Button>
-            <Button size="sm" disabled><Send className="mr-1.5 h-4 w-4" />Send to Filing Partner</Button>
+            <Button variant="outline" size="sm" disabled={calcAle.isPending}
+              onClick={() => calcAle.mutate({ complianceYear: Number(complianceYear) })}>
+              <Calculator className="mr-1.5 h-4 w-4" />{calcAle.isPending ? "Calculating…" : "Recalculate ALE"}
+            </Button>
+            <Button variant="outline" size="sm" disabled={gen1095.isPending}
+              onClick={() => gen1095.mutate({ complianceYear: Number(complianceYear) })}>
+              <FileCheck2 className="mr-1.5 h-4 w-4" />{gen1095.isPending ? "Generating…" : "Generate 1095-C"}
+            </Button>
+            <Button size="sm" variant="secondary" disabled title="E-filing is not enabled (deferred)"><Send className="mr-1.5 h-4 w-4" />Send to Filing Partner</Button>
           </div>
         )}
       </div>
@@ -187,7 +215,7 @@ export function CompliancePage() {
       {tab === "overview" && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {OVERVIEW.map((k) => (
+            {overviewCards.map((k) => (
               <Card key={k.label}><CardContent className="p-4">
                 <div className={`mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg ${k.iconCls}`}><k.icon className="h-4 w-4" /></div>
                 <div className={`text-lg font-semibold ${k.tone}`}>{k.value}</div>
@@ -211,7 +239,7 @@ export function CompliancePage() {
             <Card>
               <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><CalendarDays className="h-4 w-4 text-primary" /> Upcoming Compliance Deadlines</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {DEADLINES.map((d) => (
+                {deadlineRows.map((d) => (
                   <div key={d.item} className="flex items-center justify-between gap-3 rounded-md border p-2.5 text-sm">
                     <div className="min-w-0"><div className="truncate font-medium">{d.item}</div><div className="text-[11px] text-muted-foreground">{d.date} · {d.category}</div></div>
                     <StatusPill label={d.status} tone={calTone[d.status] ?? "muted"} />
@@ -241,7 +269,7 @@ export function CompliancePage() {
                 <Ban className="mt-0.5 h-4 w-4 shrink-0" /><span><span className="font-medium">Filing is blocked: 38 forms cannot be transmitted.</span> ACA lookback depends on Payroll Data — resolve missing hours there.</span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {READINESS_ISSUES.map((i) => (
+                {readinessIssueRows.map((i) => (
                   <button key={i.label} className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-left text-sm transition hover:bg-muted/60">
                     <span className="flex items-center gap-2"><AlertTriangle className={`h-4 w-4 ${i.tone === "danger" ? "text-destructive" : i.tone === "warning" ? "text-warning" : "text-info"}`} />{i.label}</span>
                     <span className="flex items-center gap-1"><StatusPill label={String(i.count)} tone={i.tone} /><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></span>
@@ -294,7 +322,7 @@ export function CompliancePage() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Month</TableHead><TableHead className="text-right">Full-Time</TableHead><TableHead className="text-right">PT / Non-FT Hours</TableHead><TableHead className="text-right">FTE</TableHead><TableHead className="text-right">Total ALE Count</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {ALE_MONTHS.map((m) => (
+                    {aleMonthRows.map((m) => (
                       <TableRow key={m.month} className={m.status === "Missing Data" ? "bg-destructive/5" : undefined}>
                         <TableCell className="font-medium">{m.month}</TableCell>
                         <TableCell className="text-right text-sm tabular-nums">{m.ft}</TableCell>
@@ -328,7 +356,7 @@ export function CompliancePage() {
                         <TableCell className="font-mono text-xs">{r.line16 === "Missing" ? <span className="text-destructive">Missing</span> : r.line16}</TableCell>
                         <TableCell className="text-right text-sm">{r.months}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{r.issues}</TableCell>
-                        <TableCell><StatusPill label={r.status} tone={formTone[r.status]} /></TableCell>
+                        <TableCell><StatusPill label={r.status} tone={formTone[r.status] ?? "muted"} /></TableCell>
                         <TableCell className="text-right"><Button size="sm" variant="outline" className="h-8">{r.status === "Ready" ? "View" : "Fix Codes"}</Button></TableCell>
                       </TableRow>
                     ))}
@@ -345,7 +373,7 @@ export function CompliancePage() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Wage / Basis</TableHead><TableHead>Lowest EE-Only Premium</TableHead><TableHead>Result</TableHead><TableHead>Safe Harbor Code</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {AFFORD_ROWS.map((r) => (
+                    {affordRows.map((r) => (
                       <TableRow key={r.e}>
                         <TableCell className="font-medium">{r.e}</TableCell>
                         <TableCell className="text-xs"><span className={`font-medium ${r.wage === "Missing" ? "text-destructive" : ""}`}>{r.wage}</span> <span className="text-muted-foreground">· {r.basis}</span></TableCell>
@@ -373,12 +401,17 @@ export function CompliancePage() {
       {tab === "cobra" && !brokerView && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
+            {(ws ? [
+              { label: "Active Participants", value: String(ws.cobraStats.activeParticipants), tone: "text-foreground" },
+              { label: "Qualifying Events", value: String(ws.cobraStats.qualifyingEvents), tone: "text-warning" },
+              { label: "Overdue Notices", value: String(ws.cobraStats.overdueNotices), tone: "text-destructive" },
+              { label: "Payment Issues (TPA)", value: String(ws.cobraStats.paymentIssues), tone: "text-muted-foreground" },
+            ] : [
               { label: "Active Participants", value: "6", tone: "text-foreground" },
               { label: "Qualifying Events", value: "5", tone: "text-warning" },
               { label: "Overdue Notices", value: "2", tone: "text-destructive" },
               { label: "Payment Issues", value: "1", tone: "text-destructive" },
-            ].map((k) => (
+            ]).map((k) => (
               <Card key={k.label}><CardContent className="p-4"><div className={`text-xl font-semibold tabular-nums ${k.tone}`}>{k.value}</div><div className="mt-0.5 text-xs text-muted-foreground">{k.label}</div></CardContent></Card>
             ))}
           </div>
@@ -396,7 +429,7 @@ export function CompliancePage() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Qualifying Event</TableHead><TableHead>Notice</TableHead><TableHead>Election / Status</TableHead><TableHead>Payment</TableHead><TableHead>Carrier / TPA</TableHead><TableHead>Next Step</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {COBRA_EVENTS.map((e) => (
+                    {cobraEventRows.map((e) => (
                       <TableRow key={e.person + e.event}>
                         <TableCell><div className="font-medium">{e.person}</div><div className="text-xs text-muted-foreground">{e.relationship}</div></TableCell>
                         <TableCell className="text-sm">{e.event}</TableCell>
@@ -421,7 +454,7 @@ export function CompliancePage() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Relationship</TableHead><TableHead>Qualifying Event</TableHead><TableHead>Coverage</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {COBRA_BENEFICIARIES.map((b) => (
+                    {cobraBeneficiaryRows.map((b) => (
                       <TableRow key={b.name}>
                         <TableCell className="font-medium">{b.name}</TableCell>
                         <TableCell className="text-sm">{b.relationship}</TableCell>
@@ -471,7 +504,7 @@ export function CompliancePage() {
             <Table>
               <TableHeader><TableRow><TableHead>Notice</TableHead><TableHead>Audience</TableHead><TableHead>Due</TableHead><TableHead>Delivery</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
               <TableBody>
-                {NOTICES.map((n) => (
+                {noticeRows.map((n) => (
                   <TableRow key={n.type}>
                     <TableCell className="font-medium">{n.type}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{n.audience}</TableCell>
