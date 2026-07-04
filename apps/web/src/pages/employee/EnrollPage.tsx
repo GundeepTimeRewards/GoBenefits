@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/common";
 import { DependentsSection } from "@/components/census/DependentsSection";
 import { enrollSteps, myComparePlans, coverageTiers, myDependents } from "@/lib/employee-self-mock";
+import { PlanComparisonCard } from "@/components/enrollment/PlanComparisonCard";
 
 export function EnrollPage() {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export function EnrollPage() {
   const [planId, setPlanId] = useState(myComparePlans[0].id);
   const [tier, setTier] = useState("family");
   const [waived, setWaived] = useState(false);
+  const [usage, setUsage] = useState<"low" | "medium" | "high">("medium");
 
   const plan = myComparePlans.find((p) => p.id === planId)!;
   const tierLabel = coverageTiers.find((t) => t.key === tier)?.label ?? "";
@@ -46,7 +48,16 @@ export function EnrollPage() {
           {step === 1 && <DependentsSection dependents={myDependents} />}
 
           {step === 2 && (
-            <div className="space-y-2">
+            <div className="space-y-3">
+              <PlanComparisonCard
+                employerId="self"
+                planYearId="self"
+                employeeId={null}
+                usage={usage}
+                onUsageChange={setUsage}
+                selectedPlanId={planId}
+                onPick={setPlanId}
+              />
               {myComparePlans.map((p) => (
                 <button key={p.id} onClick={() => setPlanId(p.id)} className={`flex w-full items-center justify-between rounded-md border p-3 text-left ${planId === p.id ? "border-primary bg-primary/5" : "border-border/60"}`}>
                   <div>

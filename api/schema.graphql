@@ -707,6 +707,37 @@ type Election {
   coveredDependents: [Dependent!]!
 }
 type Quote { id: ID!  employerId: ID!  planYearId: ID!  createdAt: AWSDateTime!  lines: [QuoteLine!]! }
+
+## --- Decision Support (enrollment plan comparison) ---------------------------
+## Estimated total annual cost per medical plan for one employee at a usage level,
+## with a recommendation. Costs are the SAME rate-engine math as deductions;
+## care-cost is a transparent deductible/OOP + coinsurance model (not actuarial).
+enum UsageLevel { low medium high }
+type PlanComparison {
+  employerId: ID!
+  planYearId: ID!
+  employeeId: ID!
+  coverageTier: CoverageTier!
+  usage: UsageLevel!
+  plans: [PlanComparisonRow!]!
+  recommendedPlanId: ID          ## lowest estimated total; null when no medical plans
+  annualSavings: Float           ## recommended vs the costliest option (0 when ≤1 plan)
+  note: String
+}
+type PlanComparisonRow {
+  planId: ID!
+  planName: String!
+  carrier: String
+  subtype: String
+  hsaEligible: Boolean!
+  monthlyPremium: Float!         ## employee share, per month
+  annualPremium: Float!          ## employee share × 12
+  deductible: Float              ## tier-appropriate (single vs family)
+  outOfPocketMax: Float
+  estimatedCareCost: Float!      ## member OOP for the usage level
+  estimatedAnnualCost: Float!    ## annualPremium + estimatedCareCost
+  recommended: Boolean!
+}
 type QuoteLine { line: CoverageLine!  planId: ID!  monthlyTotal: Float!  employerCost: Float!  employeeCost: Float! }
 
 ## Cross-tenant rollup for broker/agency dashboards (aggregate read-model).
@@ -728,6 +759,8 @@ type Query {
   myEmployers: [EmployerSummary!]!
   employer(employerId: ID!): Employer
   employerOverview(employerId: ID!, planYearId: ID!): EmployerOverview
+  ## Decision Support — enrollment plan comparison + recommendation for one employee.
+  planComparison(employerId: ID!, planYearId: ID!, employeeId: ID!, usage: UsageLevel): PlanComparison!
   employerProgress(planYearId: ID!): [EmployerProgress!]!   ## broker/agency cross-tenant rollup
 
   ## Plan years

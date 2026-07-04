@@ -29,6 +29,8 @@ import * as payrollDataRepo from "./payroll-data-repository.js";
 import * as cobraRepo from "./cobra-repository.js";
 import * as acaRepo from "./aca-repository.js";
 import * as quoteRepo from "./quote-repository.js";
+import * as comparisonRepo from "./plan-comparison-repository.js";
+import { estimateAnnualPlanCost, type UsageLevel } from "@goben/rate-engine";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -1253,6 +1255,140 @@ export type QuoteView = {
   createdAt: string;
   lines: { line: string; planId: string; monthlyTotal: number; employerCost: number; employeeCost: number }[];
 };
+
+export type PlanComparisonRow = {
+  planId: string;
+  planName: string;
+  carrier: string | null;
+  subtype: string | null;
+  hsaEligible: boolean;
+  monthlyPremium: number;
+  annualPremium: number;
+  deductible: number | null;
+  outOfPocketMax: number | null;
+  estimatedCareCost: number;
+  estimatedAnnualCost: number;
+  recommended: boolean;
+};
+export type PlanComparison = {
+  employerId: string;
+  planYearId: string;
+  employeeId: string;
+  coverageTier: string;
+  usage: UsageLevel;
+  plans: PlanComparisonRow[];
+  recommendedPlanId: string | null;
+  annualSavings: number | null;
+  note: string | null;
+};
+
+const USAGE_LEVELS = new Set<UsageLevel>(["low", "medium", "high"]);
+
+/**
+ * Plan comparison + recommendation for one employee (Decision Support) — the
+ * differentiator EN lacks natively. Authorizes on `benefit_plan.read` (employer_admin,
+ * broker, AND employee all hold it), fail-closed inside getCustomerDb. For an EMPLOYEE
+ * caller it is own-records only: the employeeId is IGNORED and resolved from their own
+ * account (email link), so an employee can't price another employee's family.
+ *
+ * For each active medical plan: the employee's monthly premium share via
+ * @goben/rate-engine (the SAME math as deductions, at the employee's composed tier
+ * and age), plus an estimated annual out-of-pocket from the plan's tier-appropriate
+ * deductible/OOP under the chosen usage level. Ranked by total estimated annual cost;
+ * the lowest is recommended, with the savings vs the costliest option.
+ */
+export async function planComparison(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  employeeId: string,
+  usage?: string | null
+): Promise<PlanComparison> {
+  const { db } = await getCustomerDb(ctx, "benefit_plan.read", employerId);
+  const level: UsageLevel = USAGE_LEVELS.has(usage as UsageLevel) ? (usage as UsageLevel) : "medium";
+
+  // Own-records guard: an employee can only compare for themselves.
+  let targetEmployeeId = employeeId;
+  if (ctx.user.roleKey === "employee") {
+    const ownId = await lifeEventRepo.findEmployeeByEmail(db, ctx.user.email);
+    if (!ownId) throw new AuthError("Your account is not linked to an employee record");
+    targetEmployeeId = ownId;
+  }
+
+  const [pyRows] = await db.query(
+    `SELECT DATE_FORMAT(period_start, '%Y-%m-%d') AS start FROM plan_year WHERE id = UUID_TO_BIN(:id) LIMIT 1`,
+    { id: planYearId }
+  );
+  const py = (pyRows as any[])[0];
+  if (!py) throw new ValidationError("Plan year not found for this employer");
+  const effectiveDate = py.start as string;
+
+  const coverage = await comparisonRepo.getEmployeeCoverage(db, targetEmployeeId, effectiveDate);
+  if (!coverage) throw new ValidationError("Employee not found for this employer");
+
+  const [plans, rule] = await Promise.all([
+    comparisonRepo.listMedicalPlans(db, planYearId),
+    deductionRepo.getFullContributionRule(db),
+  ]);
+  const single = coverage.tier === "ee";
+
+  const scored: PlanComparisonRow[] = [];
+  for (const plan of plans) {
+    const rate = await deductionRepo.getRateBand(db, plan.planId, coverage.age);
+    if (!rate) continue; // no usable rate → can't price this plan
+    let monthlyEe: number;
+    try {
+      monthlyEe = computeDeduction({
+        rate,
+        tier: coverage.tier as CoverageTier,
+        split: splitForLine("medical", rule),
+        paysPerYear: 12,
+      }).monthlyEe;
+    } catch {
+      continue; // plan doesn't offer this tier
+    }
+    const deductible = single ? plan.deductibleSingle : plan.deductibleFamily;
+    const outOfPocketMax = single ? plan.oopSingle : plan.oopFamily;
+    const est = estimateAnnualPlanCost({ monthlyEmployeePremium: monthlyEe, usage: level, deductible, outOfPocketMax });
+    scored.push({
+      planId: plan.planId,
+      planName: plan.planName,
+      carrier: plan.carrierName,
+      subtype: plan.subtype,
+      hsaEligible: plan.hsaEligible,
+      monthlyPremium: monthlyEe,
+      annualPremium: est.annualPremium,
+      deductible,
+      outOfPocketMax,
+      estimatedCareCost: est.estimatedCareCost,
+      estimatedAnnualCost: est.estimatedAnnualCost,
+      recommended: false,
+    });
+  }
+
+  scored.sort((a, b) => a.estimatedAnnualCost - b.estimatedAnnualCost);
+  const recommended = scored[0] ?? null;
+  if (recommended) recommended.recommended = true;
+  const costliest = scored.length > 1 ? scored[scored.length - 1] : null;
+  const annualSavings = recommended && costliest ? roundCents(costliest.estimatedAnnualCost - recommended.estimatedAnnualCost) : recommended ? 0 : null;
+
+  const note =
+    scored.length === 0
+      ? "No medical plans with rates available to compare."
+      : `Based on ${level} expected usage, ${recommended!.planName} has the lowest estimated total annual cost for your coverage tier.`;
+
+  return {
+    employerId,
+    planYearId,
+    employeeId: coverage.employeeId,
+    coverageTier: coverage.tier,
+    usage: level,
+    plans: scored,
+    recommendedPlanId: recommended?.planId ?? null,
+    annualSavings,
+    note,
+  };
+}
 
 /**
  * Generate a benefit proposal (Phase F-3) — the legacy Step1–5 wizard reproduced as
