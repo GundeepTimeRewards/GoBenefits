@@ -70,6 +70,8 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "openElectionWindow",
   "documentWorkspace", // Phase E-3 (plan-year-scoped read)
   "generateConfirmations",
+  "reportLifeEvent", // FE-polish (Phase E-4 employee self; identity-scoped)
+  "employeeLifeEvents",
   "uploadDocument", // FE-polish (Phase E-3 backend)
   "requestSignature",
   "payrollDataWorkspace", // FE-polish (Phase E-5 backend; employer-only)
