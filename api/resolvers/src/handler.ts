@@ -146,6 +146,10 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     case "recalculateLookback":
       return employerService.runAcaLookback(ctx, a.employerId, a.planYearId);
 
+    // --- Quoting (Phase F-3) — legacy Step1–5 census-composition proposal; rate.manage ---
+    case "generateQuote":
+      return employerService.generateQuote(ctx, a.input);
+
     // --- ACA compliance (Phase F-2) — aca.read / aca.manage; no e-file by decision ---
     case "complianceWorkspace":
       return employerService.complianceWorkspace(ctx, a.employerId, a.planYearId);
