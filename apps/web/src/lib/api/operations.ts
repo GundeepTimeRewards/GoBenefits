@@ -351,6 +351,44 @@ const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!,
   generateConfirmations(employerId: $employerId, planYearId: $planYearId) { jobId status }
 }`;
 
+// Compliance workspace (Phase F-4): ACA/ALE + affordability + 1095-C + COBRA + notices.
+const COMPLIANCE_WORKSPACE = `query ComplianceWorkspace($employerId: ID!, $planYearId: ID!) {
+  complianceWorkspace(employerId: $employerId, planYearId: $planYearId) {
+    complianceYear filingStatus
+    overview {
+      acaReadinessPct aleStatus formsReady formsTotal cobraPending noticesDue
+      needsAttention { key title severity route }
+      deadlines { date item category status }
+    }
+    aca {
+      readinessPercent blockedForms
+      issues { key label count tone }
+      ale { aleStatus avgMonthlyCount readinessPercent months { month fullTime ptHours fte total status } }
+      affordability { safeHarborMethod affordable needsReview missing employees { employee basis wage premium result safeHarborCode status } }
+      forms { employee acaStatus line14 line16 months status issues }
+      filingHistory { year forms partner generated submitted irsStatus corrections }
+    }
+    cobra {
+      activeParticipants qualifyingEvents overdueNotices paymentIssues
+      events { id person relationship event noticeStatus cobraStatus paymentStatus tpaStatus nextStep }
+      beneficiaries { name relationship event status }
+    }
+    notices { type audience due delivery status }
+  }
+}`;
+const CALCULATE_ALE_STATUS = `mutation CalculateAleStatus($employerId: ID!, $complianceYear: Int!) {
+  calculateAleStatus(employerId: $employerId, complianceYear: $complianceYear) { jobId status }
+}`;
+const GENERATE_1095C = `mutation Generate1095c($employerId: ID!, $complianceYear: Int!) {
+  generate1095c(employerId: $employerId, complianceYear: $complianceYear) { jobId status }
+}`;
+const CREATE_COBRA_EVENT = `mutation CreateCobraEvent($employerId: ID!, $input: CreateCobraEventInput!) {
+  createCobraEvent(employerId: $employerId, input: $input) { id person event cobraStatus }
+}`;
+const GENERATE_COBRA_NOTICE = `mutation GenerateCobraNotice($employerId: ID!, $cobraEventId: ID!) {
+  generateCobraNotice(employerId: $employerId, cobraEventId: $cobraEventId) { ok message id }
+}`;
+
 // --- Operation registry (the 14 C1 operations) -------------------------------
 export const operations = {
   // Queries
@@ -403,6 +441,11 @@ export const operations = {
   openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
   documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  complianceWorkspace: { name: "complianceWorkspace", kind: "query", document: COMPLIANCE_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  calculateAleStatus: { name: "calculateAleStatus", kind: "mutation", document: CALCULATE_ALE_STATUS, buildVariables: (a: { employerId: string; complianceYear: number }) => ({ employerId: a.employerId, complianceYear: a.complianceYear }) } as C1Operation<{ employerId: string; complianceYear: number }, unknown>,
+  generate1095c: { name: "generate1095c", kind: "mutation", document: GENERATE_1095C, buildVariables: (a: { employerId: string; complianceYear: number }) => ({ employerId: a.employerId, complianceYear: a.complianceYear }) } as C1Operation<{ employerId: string; complianceYear: number }, unknown>,
+  createCobraEvent: { name: "createCobraEvent", kind: "mutation", document: CREATE_COBRA_EVENT, buildVariables: (a: { employerId: string; input: Record<string, unknown> }) => ({ employerId: a.employerId, input: compact(a.input) }) } as C1Operation<{ employerId: string; input: Record<string, unknown> }, unknown>,
+  generateCobraNotice: { name: "generateCobraNotice", kind: "mutation", document: GENERATE_COBRA_NOTICE, buildVariables: (a: { employerId: string; cobraEventId: string }) => ({ employerId: a.employerId, cobraEventId: a.cobraEventId }) } as C1Operation<{ employerId: string; cobraEventId: string }, unknown>,
 } as const;
 
 export type C1OperationName = keyof typeof operations;

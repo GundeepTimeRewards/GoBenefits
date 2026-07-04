@@ -424,3 +424,16 @@ export function useOpenElectionWindow(employerId: string) {
 export function useGenerateConfirmations(employerId: string) {
   return useGatedMutation<{ planYearId: string }>("generateConfirmations", employerId, DOCUMENT_READS);
 }
+
+// --- Compliance mutations (Phase F-4) ---------------------------------------------
+const COMPLIANCE_READS = ["complianceWorkspace", "employerOverview"];
+
+export function useCalculateAleStatus(employerId: string) {
+  return useGatedMutation<{ complianceYear: number }>("calculateAleStatus", employerId, COMPLIANCE_READS);
+}
+export function useGenerate1095c(employerId: string) {
+  return useGatedMutation<{ complianceYear: number }>("generate1095c", employerId, COMPLIANCE_READS);
+}
+export function useGenerateCobraNotice(employerId: string) {
+  return useGatedMutation<{ cobraEventId: string }>("generateCobraNotice", employerId, COMPLIANCE_READS);
+}

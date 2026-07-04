@@ -663,10 +663,11 @@ type ComplianceOverview {
   deadlines: [ComplianceDeadline!]!
 }
 type ComplianceDeadline { date: String!  item: String!  category: String!  status: String! }
+type AcaReadinessIssue { key: ID!  label: String!  count: Int!  tone: String! }
 type AcaCompliance {
   readinessPercent: Int!
   blockedForms: Int!
-  issues: [ReadinessItem!]!
+  issues: [AcaReadinessIssue!]!
   ale: AleDetermination!
   affordability: Affordability!
   forms: [Form1095c!]!

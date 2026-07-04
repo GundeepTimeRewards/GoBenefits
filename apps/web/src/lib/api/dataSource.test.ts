@@ -24,8 +24,10 @@ describe("decideDataSource", () => {
   });
 
   test("hybrid + non-live-capable hook → mock", () => {
+    // payrollWorkspace stays mock-only (the Payroll Data page hasn't been split/wired);
+    // reports/integrations/settings modules are likewise not live-capable yet.
     expect(decideDataSource("hybrid", true, "payrollWorkspace", LIVE_ID)).toBe("mock");
-    expect(decideDataSource("hybrid", true, "complianceWorkspace", LIVE_ID)).toBe("mock");
+    expect(decideDataSource("hybrid", true, "reportsModule", LIVE_ID)).toBe("mock");
   });
 
   test("employerOverview is live-capable (Phase D-4)", () => {

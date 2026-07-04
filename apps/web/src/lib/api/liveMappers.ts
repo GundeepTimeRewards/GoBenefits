@@ -515,3 +515,90 @@ export function mapDocumentWorkspace(v: LiveDocumentWorkspace): MockDocumentWork
     })),
   };
 }
+
+// --- Compliance workspace (Phase F-4) ------------------------------------------
+export type ComplianceView = {
+  overview: { label: string; value: string; sub: string; tone: string; iconKey: string; iconCls: string }[];
+  needsAttention: { label: string; tone: "danger" | "warning" | "info"; payroll?: boolean }[];
+  deadlines: { date: string; item: string; category: string; status: string }[];
+  readinessIssues: { label: string; count: number; tone: "danger" | "warning" | "info" }[];
+  readinessPct: number;
+  aleStatus: string;
+  avgMonthly: string;
+  affordabilityMethod: string;
+  affordable: number;
+  needsReviewCount: number;
+  missingCount: number;
+  forms: { employee: string; aca: string; line14: string; line16: string; months: string; status: string; issues: string }[];
+  aleMonths: { month: string; ft: number; ptHours: string; fte: string; total: string; status: string }[];
+  affordRows: { e: string; basis: string; wage: string; premium: string; result: string; code: string; status: string }[];
+  cobraStats: { activeParticipants: number; qualifyingEvents: number; overdueNotices: number; paymentIssues: number };
+  cobraEvents: { id: string; person: string; relationship: string; event: string; notice: string; cobra: string; payment: string; tpa: string; next: string }[];
+  cobraBeneficiaries: { name: string; relationship: string; event: string; coverage: string; status: string }[];
+  notices: { type: string; audience: string; due: string; delivery: string; status: string }[];
+  filingStatus: string;
+};
+
+type LiveCompliance = {
+  complianceYear: number;
+  filingStatus: string | null;
+  overview: {
+    acaReadinessPct: number; aleStatus: string; formsReady: number | null; formsTotal: number | null;
+    cobraPending: number | null; noticesDue: number | null;
+    needsAttention: { key: string; title: string; severity: string; route: string | null }[];
+    deadlines: { date: string; item: string; category: string; status: string }[];
+  };
+  aca: {
+    readinessPercent: number; blockedForms: number;
+    issues: { key: string; label: string; count: number; tone: string }[];
+    ale: { aleStatus: string; avgMonthlyCount: number | null; readinessPercent: number | null; months: { month: string; fullTime: number; ptHours: string | null; fte: string | null; total: string | null; status: string }[] };
+    affordability: { safeHarborMethod: string; affordable: number; needsReview: number; missing: number; employees: { employee: string; basis: string | null; wage: string | null; premium: string | null; result: string; safeHarborCode: string | null; status: string }[] };
+    forms: { employee: string; acaStatus: string | null; line14: string | null; line16: string | null; months: string | null; status: string; issues: string | null }[];
+    filingHistory: unknown[];
+  };
+  cobra: {
+    activeParticipants: number; qualifyingEvents: number; overdueNotices: number; paymentIssues: number;
+    events: { id: string; person: string; relationship: string | null; event: string; noticeStatus: string | null; cobraStatus: string | null; paymentStatus: string | null; tpaStatus: string | null; nextStep: string | null }[];
+    beneficiaries: { name: string; relationship: string | null; event: string; status: string }[];
+  };
+  notices: { type: string; audience: string | null; due: string | null; delivery: string | null; status: string }[];
+};
+
+const OVERVIEW_TONE = (n: number) => (n === 0 ? "text-success" : "text-warning");
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+// Live cobra_status enum → the page's short display labels.
+const COBRA_STATUS_LABEL: Record<string, string> = {
+  pending_review: "Pending", notice_due: "Due", notice_overdue: "Overdue", notice_sent: "Sent",
+  election_window_open: "Open", elected: "Elected", waived: "Waived", election_expired: "Expired", complete: "Complete",
+};
+
+export function mapComplianceWorkspace(v: LiveCompliance): ComplianceView {
+  const o = v.overview;
+  return {
+    overview: [
+      { label: "ACA Readiness", value: `${o.acaReadinessPct}%`, sub: `${o.formsReady ?? 0} of ${o.formsTotal ?? 0} forms ready`, tone: OVERVIEW_TONE(100 - o.acaReadinessPct), iconKey: "shield", iconCls: "bg-success/10 text-success" },
+      { label: "ALE / FTE Status", value: o.aleStatus, sub: v.aca.ale.avgMonthlyCount != null ? `Avg ${v.aca.ale.avgMonthlyCount} / month` : "Not calculated", tone: "text-info", iconKey: "users", iconCls: "bg-info/10 text-info" },
+      { label: "1095-C Forms", value: `${o.formsReady ?? 0} / ${o.formsTotal ?? 0}`, sub: `${v.aca.blockedForms} blocked`, tone: OVERVIEW_TONE(v.aca.blockedForms), iconKey: "file", iconCls: "bg-warning/15 text-warning" },
+      { label: "COBRA Pending", value: String(o.cobraPending ?? 0), sub: `${v.cobra.overdueNotices} notices overdue`, tone: OVERVIEW_TONE(o.cobraPending ?? 0), iconKey: "bar", iconCls: "bg-warning/15 text-warning" },
+      { label: "Notices Due", value: String(o.noticesDue ?? 0), sub: `${v.cobra.overdueNotices} overdue`, tone: OVERVIEW_TONE(o.noticesDue ?? 0), iconKey: "bell", iconCls: "bg-warning/15 text-warning" },
+    ],
+    needsAttention: o.needsAttention.map((a) => ({ label: a.title, tone: a.severity === "high" ? "danger" : a.severity === "medium" ? "warning" : "info", payroll: /payroll|hours|wage/i.test(a.title) })),
+    deadlines: o.deadlines.map((d) => ({ date: d.date, item: d.item, category: d.category, status: cap(d.status.replace(/_/g, " ")) })),
+    readinessIssues: v.aca.issues.map((i) => ({ label: i.label, count: i.count, tone: (i.tone === "danger" ? "danger" : i.tone === "warning" ? "warning" : "info") })),
+    readinessPct: v.aca.readinessPercent,
+    aleStatus: v.aca.ale.aleStatus,
+    avgMonthly: v.aca.ale.avgMonthlyCount != null ? String(v.aca.ale.avgMonthlyCount) : "—",
+    affordabilityMethod: v.aca.affordability.safeHarborMethod,
+    affordable: v.aca.affordability.affordable,
+    needsReviewCount: v.aca.affordability.needsReview,
+    missingCount: v.aca.affordability.missing,
+    forms: v.aca.forms.map((f) => ({ employee: f.employee, aca: f.acaStatus ?? "—", line14: f.line14 ?? "Missing", line16: f.line16 ?? "Missing", months: f.months ?? "0", status: cap(f.status), issues: f.issues ?? "—" })),
+    aleMonths: v.aca.ale.months.map((m) => ({ month: m.month, ft: m.fullTime, ptHours: m.ptHours ?? "—", fte: m.fte ?? "—", total: m.total ?? "—", status: "Ready" })),
+    affordRows: v.aca.affordability.employees.map((e) => ({ e: e.employee, basis: e.basis ?? "—", wage: e.wage ?? "Missing", premium: e.premium ?? "—", result: e.result.startsWith("Affordable") ? "Affordable" : e.result.startsWith("Unaffordable") ? "Needs Review" : e.result, code: e.safeHarborCode ?? "Missing", status: e.status === "affordable" ? "Ready" : e.status === "needs_review" ? "Review" : "Issue" })),
+    cobraStats: { activeParticipants: v.cobra.activeParticipants, qualifyingEvents: v.cobra.qualifyingEvents, overdueNotices: v.cobra.overdueNotices, paymentIssues: v.cobra.paymentIssues },
+    cobraEvents: v.cobra.events.map((e) => ({ id: e.id, person: e.person, relationship: cap(e.relationship ?? "employee"), event: e.event, notice: e.noticeStatus ? cap(e.noticeStatus) : "—", cobra: COBRA_STATUS_LABEL[e.cobraStatus ?? ""] ?? "—", payment: "TPA", tpa: e.tpaStatus ?? "TPA", next: e.nextStep ?? "—" })),
+    cobraBeneficiaries: v.cobra.beneficiaries.map((b) => ({ name: b.name, relationship: cap(b.relationship ?? ""), event: b.event, coverage: "—", status: COBRA_STATUS_LABEL[b.status] ?? cap(b.status) })),
+    notices: v.notices.map((n) => ({ type: n.type, audience: n.audience ?? "—", due: n.due ?? "—", delivery: n.delivery ?? "—", status: cap(n.status) })),
+    filingStatus: v.filingStatus ?? "In Preparation",
+  };
+}
