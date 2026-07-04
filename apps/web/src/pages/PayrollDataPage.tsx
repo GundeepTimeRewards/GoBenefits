@@ -13,7 +13,8 @@ import { StatusPill, LoadingCard, RoleNotAvailable } from "@/components/common";
 import { useRole } from "@/lib/role-context";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
-import { useEmployer, usePayrollWorkspace } from "@/lib/api";
+import { useEmployer, usePayrollDataWorkspace } from "@/lib/api";
+import { ImportPayrollForm, RunLookbackButton, SyncProviderButton } from "@/components/payroll/PayrollDataForms";
 import type { PayPeriodStatus, PayrollAcaStatus } from "@/lib/mock/db";
 
 // Payroll Data is supporting setup/compliance data. Employer-level only.
@@ -61,7 +62,7 @@ export function PayrollDataPage() {
   const planYearId = useActivePlanYearId();
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
-  const { data: ws } = usePayrollWorkspace(employerId, planYearId);
+  const { data: ws } = usePayrollDataWorkspace(employerId, planYearId);
   const [tab, setTab] = useState<TabKey>("connection");
 
   if (PAYROLL_BLOCKED.has(role)) {
@@ -94,10 +95,9 @@ export function PayrollDataPage() {
         </div>
         {!readOnly && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm"><RefreshCw className="mr-1.5 h-4 w-4" />Sync Provider</Button>
-            <Button variant="outline" size="sm"><Calculator className="mr-1.5 h-4 w-4" />Run Lookback</Button>
-            <Button size="sm"><Upload className="mr-1.5 h-4 w-4" />Import Payroll Data</Button>
-            <Button variant="ghost" size="sm">More</Button>
+            <SyncProviderButton employerId={employerId} />
+            <RunLookbackButton employerId={employerId} planYearId={planYearId} />
+            <ImportPayrollForm employerId={employerId} />
           </div>
         )}
       </div>
@@ -262,7 +262,7 @@ export function PayrollDataPage() {
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button size="sm" variant="outline"><AlertTriangle className="mr-1.5 h-4 w-4" />Resolve Payroll Issues</Button>
                   <Button size="sm" variant="outline"><Users className="mr-1.5 h-4 w-4" />View Unmatched Employees</Button>
-                  <Button size="sm" variant="outline"><Calculator className="mr-1.5 h-4 w-4" />Recalculate Lookback</Button>
+                  <RunLookbackButton employerId={employerId} planYearId={planYearId} />
                 </div>
               )}
             </CardContent>

@@ -437,3 +437,17 @@ export function useGenerate1095c(employerId: string) {
 export function useGenerateCobraNotice(employerId: string) {
   return useGatedMutation<{ cobraEventId: string }>("generateCobraNotice", employerId, COMPLIANCE_READS);
 }
+
+// --- Payroll data mutations (FE-polish; Phase E-5 backend) ------------------------
+import type { ImportPayrollArgs } from "./operations";
+const PAYROLL_DATA_READS = ["payrollDataWorkspace", "deductionsWorkspace", "complianceWorkspace"];
+
+export function useImportPayrollData(employerId: string) {
+  return useGatedMutation<Omit<ImportPayrollArgs, "employerId">>("importPayrollData", employerId, PAYROLL_DATA_READS);
+}
+export function useSyncPayrollProvider(employerId: string) {
+  return useGatedMutation<Record<string, never>>("syncPayrollProvider", employerId, PAYROLL_DATA_READS);
+}
+export function useRunAcaLookback(employerId: string) {
+  return useGatedMutation<{ planYearId: string }>("runAcaLookback", employerId, PAYROLL_DATA_READS);
+}
