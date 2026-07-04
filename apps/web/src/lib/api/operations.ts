@@ -111,6 +111,8 @@ export type DenyLifeEventArgs = LifeEventCaseArgs & { reason?: string };
 export type ReconcileBatchArgs = { employerId: string; batchId: string };
 export type PayrollRowInput = { employeeNumber: string; hours: number; wages?: number };
 export type ImportPayrollArgs = { employerId: string; input: { source: string; fileName?: string; periodStart: string; periodEnd: string; payDate?: string; rows: PayrollRowInput[] } };
+export type UploadDocumentArgs = { employerId: string; planYearId: string; category: string; name: string; planId?: string };
+export type RequestSignatureArgs = { employerId: string; documentId: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -354,6 +356,12 @@ const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!,
 }`;
 
 // Compliance workspace (Phase F-4): ACA/ALE + affordability + 1095-C + COBRA + notices.
+const UPLOAD_DOCUMENT = `mutation UploadDocument($employerId: ID!, $planYearId: ID!, $category: String!, $name: String!, $planId: ID) {
+  uploadDocument(employerId: $employerId, planYearId: $planYearId, category: $category, name: $name, planId: $planId) { documentId name category status }
+}`;
+const REQUEST_SIGNATURE = `mutation RequestSignature($employerId: ID!, $documentId: ID!) {
+  requestSignature(employerId: $employerId, documentId: $documentId) { ok message id }
+}`;
 const PAYROLL_DATA_WORKSPACE = `query PayrollDataWorkspace($employerId: ID!, $planYearId: ID!) {
   payrollDataWorkspace(employerId: $employerId, planYearId: $planYearId) {
     readOnly
@@ -464,6 +472,8 @@ export const operations = {
   openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
   documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  uploadDocument: { name: "uploadDocument", kind: "mutation", document: UPLOAD_DOCUMENT, buildVariables: (a: UploadDocumentArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, category: a.category, name: a.name, planId: a.planId }) } as C1Operation<UploadDocumentArgs, unknown>,
+  requestSignature: { name: "requestSignature", kind: "mutation", document: REQUEST_SIGNATURE, buildVariables: (a: RequestSignatureArgs) => ({ employerId: a.employerId, documentId: a.documentId }) } as C1Operation<RequestSignatureArgs, unknown>,
   payrollDataWorkspace: { name: "payrollDataWorkspace", kind: "query", document: PAYROLL_DATA_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   importPayrollData: { name: "importPayrollData", kind: "mutation", document: IMPORT_PAYROLL_DATA, buildVariables: (a: ImportPayrollArgs) => ({ employerId: a.employerId, input: compact(a.input) }) } as C1Operation<ImportPayrollArgs, unknown>,
   syncPayrollProvider: { name: "syncPayrollProvider", kind: "mutation", document: SYNC_PAYROLL_PROVIDER, buildVariables: (a: { employerId: string }) => ({ employerId: a.employerId }) } as C1Operation<{ employerId: string }, unknown>,

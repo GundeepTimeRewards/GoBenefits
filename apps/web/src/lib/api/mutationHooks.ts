@@ -451,3 +451,14 @@ export function useSyncPayrollProvider(employerId: string) {
 export function useRunAcaLookback(employerId: string) {
   return useGatedMutation<{ planYearId: string }>("runAcaLookback", employerId, PAYROLL_DATA_READS);
 }
+
+// --- Document mutations (FE-polish; Phase E-3 backend) ----------------------------
+import type { UploadDocumentArgs } from "./operations";
+const DOCUMENT_MUT_READS = ["documentWorkspace", "planCatalog", "planYearSetup", "employerOverview"];
+
+export function useUploadDocument(employerId: string) {
+  return useGatedMutation<Omit<UploadDocumentArgs, "employerId">>("uploadDocument", employerId, DOCUMENT_MUT_READS);
+}
+export function useRequestSignature(employerId: string) {
+  return useGatedMutation<{ documentId: string }>("requestSignature", employerId, DOCUMENT_MUT_READS);
+}
