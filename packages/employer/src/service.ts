@@ -28,6 +28,7 @@ import * as docRepo from "./document-repository.js";
 import * as payrollDataRepo from "./payroll-data-repository.js";
 import * as cobraRepo from "./cobra-repository.js";
 import * as acaRepo from "./aca-repository.js";
+import * as quoteRepo from "./quote-repository.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -45,7 +46,7 @@ import {
   type DeductionChange,
   type DeductionReviewSummary,
 } from "./deduction-workspace.js";
-import { computeDeduction, splitForLine, type CoverageTier } from "@goben/rate-engine";
+import { computeDeduction, splitForLine, roundCents, type CoverageTier } from "@goben/rate-engine";
 import { buildElectionReview, deriveReviewRow, type ElectionReview, type ElectionReviewRow } from "./election-review.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -1241,6 +1242,105 @@ export async function recordCobraElection(
 export async function recordCobraPayment(ctx: AuthContext, employerId: string): Promise<never> {
   await getCustomerDb(ctx, "cobra.manage", employerId); // authorization still applies
   throw new ValidationError("COBRA premium collection is administered by the TPA — payment tracking is not enabled");
+}
+
+export type QuoteView = {
+  id: string;
+  employerId: string;
+  planYearId: string;
+  createdAt: string;
+  lines: { line: string; planId: string; monthlyTotal: number; employerCost: number; employeeCost: number }[];
+};
+
+/**
+ * Generate a benefit proposal (Phase F-3) — the legacy Step1–5 wizard reproduced as
+ * a census-composition quote. `rate.manage` (the broker/employer benefits-config
+ * permission). Step semantics:
+ *   Step 1  employer + plan year (the input)
+ *   Step 2  census composition — every ACTIVE employee is tiered from their
+ *           dependents (family / ee_spouse / ee_child / ee)
+ *   Step 3  for each requested plan, cost every census member at their tier via
+ *           @goben/rate-engine (the SAME monthly math as deductions), using the
+ *           employer's contribution rule for the ER/EE split; members whose tier a
+ *           plan doesn't offer are skipped and counted
+ *   Step 4  aggregate per plan → one QuoteLine (monthly total / employer / employee)
+ *   Step 5  persist the proposal (quote + lines)
+ * Age uses the plan year's coverage start as the effective date (rate-format-aware
+ * age-banding falls back to composite when a band is absent).
+ */
+export async function generateQuote(
+  ctx: AuthContext,
+  input: { employerId: string; planYearId: string; planIds: string[] }
+): Promise<QuoteView> {
+  const { db } = await getCustomerDb(ctx, "rate.manage", input.employerId);
+  if (!input.planIds || input.planIds.length === 0) throw new ValidationError("Select at least one plan to quote");
+
+  const [pyRows] = await db.query(
+    `SELECT status, DATE_FORMAT(period_start, '%Y-%m-%d') AS start FROM plan_year WHERE id = UUID_TO_BIN(:id) LIMIT 1`,
+    { id: input.planYearId }
+  );
+  const py = (pyRows as any[])[0];
+  if (!py) throw new ValidationError("Plan year not found for this employer");
+  const effectiveDate = py.start as string;
+
+  const plans = await quoteRepo.quotablePlans(db, input.planYearId, input.planIds);
+  if (plans.length === 0) throw new ValidationError("None of the selected plans belong to this plan year");
+
+  const [census, rule] = await Promise.all([
+    quoteRepo.activeCensus(db, effectiveDate),
+    deductionRepo.getFullContributionRule(db),
+  ]);
+  if (census.length === 0) throw new ValidationError("No active employees to quote — import or activate census first");
+
+  const lines: quoteRepo.PersistQuoteLine[] = [];
+  for (const plan of plans) {
+    const split = splitForLine(plan.benefitTypeKey, rule);
+    let monthlyTotal = 0;
+    let employerCost = 0;
+    let employeeCost = 0;
+    let costed = 0;
+    for (const member of census) {
+      const rate = await deductionRepo.getRateBand(db, plan.planId, member.age);
+      if (!rate) continue;
+      try {
+        const d = computeDeduction({ rate, tier: member.tier, split, paysPerYear: 12 });
+        monthlyTotal += d.monthlyTotal;
+        employerCost += d.monthlyEr;
+        employeeCost += d.monthlyEe;
+        costed += 1;
+      } catch {
+        // plan doesn't offer this member's tier — skip (counted via `costed`)
+      }
+    }
+    lines.push({
+      planId: plan.planId,
+      monthlyTotal: roundCents(monthlyTotal),
+      employerCost: roundCents(employerCost),
+      employeeCost: roundCents(employeeCost),
+      costedEmployees: costed,
+    });
+  }
+
+  const quoteId = await quoteRepo.insertQuote(db, {
+    planYearId: input.planYearId,
+    createdBy: ctx.user.id,
+    censusCount: census.length,
+    lines,
+  });
+  const saved = (await quoteRepo.getQuote(db, quoteId))!;
+  return {
+    id: saved.id,
+    employerId: input.employerId,
+    planYearId: saved.planYearId,
+    createdAt: saved.createdAt,
+    lines: saved.lines.map((l) => ({
+      line: coverageLineOf(l.benefitTypeKey) ?? l.benefitTypeKey,
+      planId: l.planId,
+      monthlyTotal: l.monthlyTotal,
+      employerCost: l.employerCost,
+      employeeCost: l.employeeCost,
+    })),
+  };
 }
 
 /**

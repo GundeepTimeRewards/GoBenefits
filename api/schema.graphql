@@ -781,6 +781,10 @@ type Mutation {
   updateDependent(input: UpdateDependentInput!): Dependent!
   removeDependent(employerId: ID!, dependentId: ID!): RemoveResult!
   submitElection(input: SubmitElectionInput!): Election!
+  ## (Phase F-3 — IMPLEMENTED per the "use legacy system" quoting decision, 2026-07-03)
+  ## Legacy Step1–5 census-composition proposal: every active employee is tiered from
+  ## their dependents, costed per requested plan via @goben/rate-engine (the same
+  ## monthly math as deductions), aggregated per plan, and persisted (quote/quote_line).
   generateQuote(input: GenerateQuoteInput!): Quote!
   generatePayrollDeductions(employerId: ID!, planYearId: ID!): JobHandle!   ## async (SQS)
 
