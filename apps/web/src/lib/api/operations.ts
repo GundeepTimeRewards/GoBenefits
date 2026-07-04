@@ -114,6 +114,7 @@ export type ImportPayrollArgs = { employerId: string; input: { source: string; f
 export type UploadDocumentArgs = { employerId: string; planYearId: string; category: string; name: string; planId?: string };
 export type RequestSignatureArgs = { employerId: string; documentId: string };
 export type ReportLifeEventArgs = { eventType: string; eventDate: string; notes?: string };
+export type PlanComparisonArgs = { employerId: string; planYearId: string; employeeId: string; usage?: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -357,6 +358,12 @@ const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!,
 }`;
 
 // Compliance workspace (Phase F-4): ACA/ALE + affordability + 1095-C + COBRA + notices.
+const PLAN_COMPARISON = `query PlanComparison($employerId: ID!, $planYearId: ID!, $employeeId: ID!, $usage: UsageLevel) {
+  planComparison(employerId: $employerId, planYearId: $planYearId, employeeId: $employeeId, usage: $usage) {
+    coverageTier usage recommendedPlanId annualSavings note
+    plans { planId planName carrier subtype hsaEligible monthlyPremium annualPremium deductible outOfPocketMax estimatedCareCost estimatedAnnualCost recommended }
+  }
+}`;
 const REPORT_LIFE_EVENT = `mutation ReportLifeEvent($input: ReportLifeEventInput!) {
   reportLifeEvent(input: $input) { id type date status documents }
 }`;
@@ -479,6 +486,7 @@ export const operations = {
   openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
   documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  planComparison: { name: "planComparison", kind: "query", document: PLAN_COMPARISON, buildVariables: (a: PlanComparisonArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, employeeId: a.employeeId, usage: a.usage }) } as C1Operation<PlanComparisonArgs, unknown>,
   reportLifeEvent: { name: "reportLifeEvent", kind: "mutation", document: REPORT_LIFE_EVENT, buildVariables: (a: ReportLifeEventArgs) => ({ input: compact({ eventType: a.eventType, eventDate: a.eventDate, notes: a.notes }) }) } as C1Operation<ReportLifeEventArgs, unknown>,
   employeeLifeEvents: { name: "employeeLifeEvents", kind: "query", document: EMPLOYEE_LIFE_EVENTS, buildVariables: () => ({}) } as C1Operation<void, unknown>,
   uploadDocument: { name: "uploadDocument", kind: "mutation", document: UPLOAD_DOCUMENT, buildVariables: (a: UploadDocumentArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, category: a.category, name: a.name, planId: a.planId }) } as C1Operation<UploadDocumentArgs, unknown>,
