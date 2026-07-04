@@ -487,6 +487,18 @@ const DOC_STATUS: Record<string, DocStatus> = {
   Archived: "Archived",
 };
 
+/** Backend category strings → the FE DocCategoryName buckets (confirmation →
+ *  Employee Forms; everything else → Plan Documents), aggregating counts so the
+ *  category cards only ever see valid names. */
+function bucketDocCategories(cats: { title: string; total: number; sub: string }[]): { title: DocCategoryName; total: number; sub: string }[] {
+  const totals = new Map<DocCategoryName, number>();
+  for (const c of cats) {
+    const bucket: DocCategoryName = c.title === "confirmation" ? "Employee Forms" : "Plan Documents";
+    totals.set(bucket, (totals.get(bucket) ?? 0) + c.total);
+  }
+  return [...totals.entries()].map(([title, total]) => ({ title, total, sub: `${total} document(s)` }));
+}
+
 export function mapDocumentWorkspace(v: LiveDocumentWorkspace): MockDocumentWorkspace {
   return {
     readOnly: v.readOnly,
@@ -499,7 +511,7 @@ export function mapDocumentWorkspace(v: LiveDocumentWorkspace): MockDocumentWork
       key: t.key, label: t.label, related: t.related, area: t.area,
       priority: ((t.priority.charAt(0).toUpperCase() + t.priority.slice(1)) as "High" | "Medium" | "Low"),
     })),
-    categories: v.categories.map((c) => ({ title: c.title as DocCategoryName, total: c.total, sub: c.sub })),
+    categories: bucketDocCategories(v.categories),
     docs: v.documents.map((d): DocRow => ({
       id: d.documentId,
       name: d.name,

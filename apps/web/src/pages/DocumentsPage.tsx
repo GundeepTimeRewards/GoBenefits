@@ -14,7 +14,8 @@ import { StatusPill, LoadingCard } from "@/components/common";
 import { useActiveEmployerId } from "@/lib/employer-context";
 import { useActivePlanYear, useActivePlanYearId } from "@/lib/plan-year-context";
 import { useRole } from "@/lib/role-context";
-import { useEmployer, useDocumentWorkspace } from "@/lib/api";
+import { useEmployer, useDocumentWorkspace, usePlanCatalog } from "@/lib/api";
+import { UploadDocumentForm, RequestSignatureButton } from "@/components/documents/DocumentForms";
 import { useGenerateConfirmations } from "@/lib/api/mutationHooks";
 import type { DocStatus, DocCategoryName, DocRow, DocReadinessTone } from "@/lib/mock/db";
 
@@ -79,6 +80,7 @@ export function DocumentsPage() {
   const { data: employer } = useEmployer(employerId);
   const py = useActivePlanYear();
   const { data: ws } = useDocumentWorkspace(employerId, planYearId);
+  const { data: catalog } = usePlanCatalog(employerId, planYearId);
   const { role } = useRole();
 
   const [search, setSearch] = useState("");
@@ -131,7 +133,7 @@ export function DocumentsPage() {
         </div>
         {!ws.readOnly && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm"><Upload className="mr-1.5 h-4 w-4" />Upload Document</Button>
+            <UploadDocumentForm employerId={employerId} planYearId={planYearId} plans={(catalog?.rows ?? []).map((r) => ({ id: r.id, name: r.name }))} />
             <GenerateConfirmationsButton employerId={employerId} />
           </div>
         )}
@@ -203,7 +205,7 @@ export function DocumentsPage() {
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           {ws.categories.map((c) => {
-            const meta = CATEGORY_META[c.title];
+            const meta = CATEGORY_META[c.title] ?? { desc: c.sub, icon: FileText, tone: "bg-muted text-muted-foreground" };
             const active = category === c.title;
             return (
               <button key={c.title} type="button" onClick={() => { setCategory(active ? null : c.title); setIssue(null); }}
@@ -275,8 +277,8 @@ export function DocumentsPage() {
                     <TableCell><Badge variant="outline" className={TONE[docStatusTone[d.status]]}>{d.status}</Badge></TableCell>
                     <TableCell className="text-sm text-muted-foreground">{d.expires}</TableCell>
                     <TableCell className="text-right">
-                      {d.status === "Missing" && !ws.readOnly ? (
-                        <Button variant="outline" size="sm" className="h-8"><Upload className="mr-1 h-3.5 w-3.5" />Upload</Button>
+                      {!ws.readOnly && (d.status === "Published" || d.status === "Generated") ? (
+                        <RequestSignatureButton employerId={employerId} documentId={d.id} />
                       ) : (
                         <Button variant="ghost" size="sm" className="h-8 text-primary"><Eye className="mr-1 h-3.5 w-3.5" />View</Button>
                       )}
