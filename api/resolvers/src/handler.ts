@@ -153,6 +153,8 @@ async function dispatch(ctx: AuthContext, fieldName: string, a: Record<string, a
     // --- Decision Support — enrollment plan comparison; benefit_plan.read (own-records for employees) ---
     case "planComparison":
       return employerService.planComparison(ctx, a.employerId, a.planYearId, a.employeeId, a.usage);
+    case "askBenefitsAssistant":
+      return employerService.askBenefitsAssistant(ctx, a.employerId, a.planYearId, a.employeeId, a.question, a.usage);
 
     // --- ACA compliance (Phase F-2) — aca.read / aca.manage; no e-file by decision ---
     case "complianceWorkspace":

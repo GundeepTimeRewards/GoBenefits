@@ -28,6 +28,7 @@ import { TasksPage, RenewalsPage, UsersPage, MigrationPage } from "@/pages/Admin
 import { MyBenefitsPage, MyElectionsPage, MyDependentsPage, MyDocumentsPage, MyLifeEventsPage, ConfirmationPage, HelpPage } from "@/pages/employee/EmployeeSelfPages";
 import { EnrollPage } from "@/pages/employee/EnrollPage";
 import { ReportLifeEventPage } from "@/pages/employee/ReportLifeEventPage";
+import { AssistantPage } from "@/pages/employee/AssistantPage";
 
 // Auth-guard metadata placeholders (NOT enforced in FE; backend is source of truth).
 declare module "@tanstack/react-router" {
@@ -114,6 +115,7 @@ const routeTree = rootRoute.addChildren([
     em("benefits", MyBenefitsPage),
     em("enroll", EnrollPage),
     em("enroll/confirm", ConfirmationPage),
+    em("assistant", AssistantPage),
     em("elections", MyElectionsPage),
     em("dependents", MyDependentsPage),
     em("life-events", MyLifeEventsPage),

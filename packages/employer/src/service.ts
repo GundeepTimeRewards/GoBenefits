@@ -31,6 +31,15 @@ import * as acaRepo from "./aca-repository.js";
 import * as quoteRepo from "./quote-repository.js";
 import * as comparisonRepo from "./plan-comparison-repository.js";
 import { estimateAnnualPlanCost, type UsageLevel } from "@goben/rate-engine";
+import { BedrockLlmClient, FakeLlmClient, type LlmClient } from "@goben/llm";
+import {
+  renderSystemPrompt,
+  renderUserMessage,
+  ASSISTANT_DISCLAIMER,
+  SUGGESTED_QUESTIONS,
+  MAX_QUESTION_CHARS,
+  type AssistantContext,
+} from "./assistant/prompt.js";
 import {
   buildLifeEventQueue,
   toCaseView,
@@ -1387,6 +1396,120 @@ export async function planComparison(
     recommendedPlanId: recommended?.planId ?? null,
     annualSavings,
     note,
+  };
+}
+
+export type AssistantAnswer = {
+  answer: string;
+  disclaimer: string;
+  suggestedQuestions: string[];
+  usedPlanCount: number;
+  coverageTier: string;
+};
+
+/** Lazily-built default LLM client (Bedrock). Never constructed in tests — the service
+ *  takes an injectable `llm` and integration tests pass a FakeLlmClient. The model id +
+ *  region come from the Lambda's env at deploy; a current Claude Sonnet is the default. */
+let _defaultLlm: LlmClient | null = null;
+function defaultLlmClient(): LlmClient {
+  if (!_defaultLlm) {
+    // Dev/local escape hatch (never set in prod): return a deterministic offline answer
+    // so the live GraphQL path can be exercised without Bedrock creds. The answer is
+    // built from the grounding block the service passes, so it still reflects real data.
+    if (process.env.GOBEN_LLM_FAKE === "1") {
+      _defaultLlm = new FakeLlmClient((req) => {
+        const rec = /Lowest estimated total cost: ([^,\n]+)/.exec(req.messages[0]?.content ?? "")?.[1];
+        return rec
+          ? `Based on your options, ${rec} has the lowest estimated total cost for you. (offline dev answer)`
+          : "I don't have plan details to compare yet — please check with your HR team. (offline dev answer)";
+      });
+      return _defaultLlm;
+    }
+    _defaultLlm = new BedrockLlmClient({
+      modelId: process.env.BEDROCK_MODEL_ID ?? "anthropic.claude-3-5-sonnet-20241022-v2:0",
+      region: process.env.BEDROCK_REGION ?? process.env.AWS_REGION,
+    });
+  }
+  return _defaultLlm;
+}
+
+/**
+ * AI benefits assistant (first EN differentiator of its kind) — a GROUNDED employee
+ * Q&A. Authorizes on `benefit_plan.read` exactly like planComparison, and for an
+ * EMPLOYEE caller it is own-records only (the employeeId is ignored and resolved from
+ * their account email). The employee's real coverage facts — tier + every priced
+ * medical plan + the decision-support recommendation — are assembled from
+ * planComparison and passed to the LLM as the ONLY material it may answer from (see
+ * assistant/prompt.ts). The LLM is injected so tests never hit the network.
+ *
+ * Read-shaped but modeled as a mutation: each ask is a non-idempotent, side-effecting
+ * (external, metered) action, not a cacheable read.
+ */
+export async function askBenefitsAssistant(
+  ctx: AuthContext,
+  employerId: string,
+  planYearId: string,
+  employeeId: string | null | undefined,
+  question: string,
+  usage?: string | null,
+  llm: LlmClient = defaultLlmClient()
+): Promise<AssistantAnswer> {
+  const q = (question ?? "").trim();
+  if (!q) throw new ValidationError("Please enter a question.");
+  if (q.length > MAX_QUESTION_CHARS) {
+    throw new ValidationError(`Question is too long (max ${MAX_QUESTION_CHARS} characters).`);
+  }
+
+  // planComparison does the auth (benefit_plan.read), own-records resolution, and all
+  // pricing — its result IS the grounding set. We reuse it wholesale.
+  const comparison = await planComparison(ctx, employerId, planYearId, employeeId ?? "", usage);
+
+  // Enrich with the employee's name + a friendly plan-year label for the prompt. Same
+  // permission, already authorized above; the resolved own id is comparison.employeeId.
+  const { db } = await getCustomerDb(ctx, "benefit_plan.read", employerId);
+  const [pyRows, nameRows] = await Promise.all([
+    db.query(`SELECT label FROM plan_year WHERE id = UUID_TO_BIN(:id) LIMIT 1`, { id: planYearId }),
+    db.query(`SELECT CONCAT(first_name, ' ', last_name) AS name FROM employee WHERE id = UUID_TO_BIN(:id) LIMIT 1`, {
+      id: comparison.employeeId,
+    }),
+  ]);
+  const planYearLabel = ((pyRows as any)[0] as any[])[0]?.label ?? planYearId;
+  const employeeName = ((nameRows as any)[0] as any[])[0]?.name ?? "there";
+
+  const context: AssistantContext = {
+    employeeName,
+    planYearLabel,
+    coverageTier: comparison.coverageTier,
+    usage: comparison.usage,
+    plans: comparison.plans.map((p) => ({
+      planName: p.planName,
+      carrier: p.carrier,
+      subtype: p.subtype,
+      hsaEligible: p.hsaEligible,
+      monthlyPremium: p.monthlyPremium,
+      annualPremium: p.annualPremium,
+      deductible: p.deductible,
+      outOfPocketMax: p.outOfPocketMax,
+      estimatedAnnualCost: p.estimatedAnnualCost,
+      recommended: p.recommended,
+    })),
+    recommendedPlanName: comparison.plans.find((p) => p.recommended)?.planName ?? null,
+    annualSavings: comparison.annualSavings,
+  };
+
+  const { text } = await llm.complete({
+    system: renderSystemPrompt(),
+    messages: [{ role: "user", content: renderUserMessage(context, q) }],
+    maxTokens: 600,
+    temperature: 0.2,
+  });
+
+  return {
+    answer: text,
+    disclaimer: ASSISTANT_DISCLAIMER,
+    suggestedQuestions: [...SUGGESTED_QUESTIONS],
+    usedPlanCount: comparison.plans.length,
+    coverageTier: comparison.coverageTier,
   };
 }
 

@@ -71,6 +71,7 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "documentWorkspace", // Phase E-3 (plan-year-scoped read)
   "generateConfirmations",
   "planComparison", // Decision Support (plan-year-scoped read; benefit_plan.read)
+  "askBenefitsAssistant", // Decision Support (grounded AI Q&A; benefit_plan.read, own-records)
   "reportLifeEvent", // FE-polish (Phase E-4 employee self; identity-scoped)
   "employeeLifeEvents",
   "uploadDocument", // FE-polish (Phase E-3 backend)

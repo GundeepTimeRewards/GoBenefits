@@ -740,6 +740,17 @@ type PlanComparisonRow {
 }
 type QuoteLine { line: CoverageLine!  planId: ID!  monthlyTotal: Float!  employerCost: Float!  employeeCost: Float! }
 
+## AI benefits assistant (Decision Support) — a GROUNDED employee Q&A. The answer is
+## produced by an LLM constrained to the employee's own coverage facts (tier + priced
+## plans + the decision-support recommendation); it never invents plans or numbers.
+type AssistantAnswer {
+  answer: String!
+  disclaimer: String!               ## always shown: estimates/guidance, not advice
+  suggestedQuestions: [String!]!    ## starter prompts for the UI
+  usedPlanCount: Int!               ## how many plans grounded the answer (transparency)
+  coverageTier: CoverageTier!
+}
+
 ## Cross-tenant rollup for broker/agency dashboards (aggregate read-model).
 type EmployerProgress {
   employerId: ID!
@@ -875,6 +886,13 @@ type Mutation {
   ## Identity-scoped: employee role only; the caller's employee row resolves via the
   ## account-email link (user_account.email = employee_contact.email), fail-closed.
   reportLifeEvent(input: ReportLifeEventInput!): EmployeeLifeEvent
+
+  ## --- AI benefits assistant (Decision Support) — IMPLEMENTED ---
+  ## Grounded employee Q&A: benefit_plan.read, own-records for employees (employeeId
+  ## ignored + resolved from the caller). The answer is generated ONLY from the
+  ## employee's real coverage facts + decision-support comparison (see askBenefitsAssistant).
+  ## A mutation because each ask is a non-idempotent, metered external call.
+  askBenefitsAssistant(employerId: ID!, planYearId: ID!, employeeId: ID, question: String!, usage: UsageLevel): AssistantAnswer!
 
   ## --- FUTURE: Life events — HR queue (Phase E) — NOT IMPLEMENTED ---
   ## (Phase E-4 — IMPLEMENTED) HR decisions record an approval trail; openElectionWindow
