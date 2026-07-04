@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { HeartPulse, Users, Sparkles, FileText, ClipboardCheck, LifeBuoy, ListChecks } from "lucide-react";
+import { HeartPulse, Users, Sparkles, FileText, ClipboardCheck, LifeBuoy, ListChecks, Bot } from "lucide-react";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
 
 // Employee self-service shell — intentionally SEPARATE from the admin AppShell.
@@ -8,6 +8,7 @@ import { RoleSwitcher } from "@/components/RoleSwitcher";
 const nav = [
   { to: "/employee", label: "My Benefits", icon: HeartPulse, exact: true },
   { to: "/employee/enroll", label: "Enroll", icon: ClipboardCheck },
+  { to: "/employee/assistant", label: "Assistant", icon: Bot },
   { to: "/employee/elections", label: "My Elections", icon: ListChecks },
   { to: "/employee/dependents", label: "My Dependents", icon: Users },
   { to: "/employee/life-events", label: "Life Events", icon: Sparkles },

@@ -24,6 +24,11 @@ Parameters:
   DbMaxACU:
     Type: Number
     Default: 4
+  # Bedrock model for the AI benefits assistant (Decision Support). An inference-profile
+  # id is used so the model resolves per-region; override per environment/account.
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-3-5-sonnet-20241022-v2:0
 
 Globals:
   Function:
@@ -198,11 +203,23 @@ Resources:
     Properties:
       Handler: handler.handler
       CodeUri: ../
+      Environment:
+        Variables:
+          # AI benefits assistant (askBenefitsAssistant) → Bedrock Converse.
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REGION: !Ref AWS::Region
       VpcConfig:
         SubnetIds: !Ref PrivateSubnetIds
         SecurityGroupIds: [!Ref LambdaSecurityGroup]
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy: { SecretArn: !Ref DbSecret }
+        # Least-privilege: invoke only Claude foundation models + inference profiles.
+        - Statement:
+            - Effect: Allow
+              Action: [bedrock:InvokeModel]
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/anthropic.*"
+                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*anthropic.*"
     Metadata:
       BuildMethod: makefile
 
@@ -300,6 +317,18 @@ Resources:
     Type: AWS::EC2::VPCEndpoint
     Properties:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref VpcEndpointSecurityGroup]
+
+  # Bedrock runtime — the AI benefits assistant (askBenefitsAssistant) calls Converse
+  # from the in-VPC resolver Lambda, so it needs this interface endpoint (no NAT).
+  BedrockRuntimeEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
       VpcId: !Ref VpcId
       VpcEndpointType: Interface
       PrivateDnsEnabled: true

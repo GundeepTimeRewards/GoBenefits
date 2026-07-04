@@ -130,3 +130,83 @@ export function usePlanComparison(employerId: string, planYearId: string, employ
       : () => mockComparison(usage),
   });
 }
+
+// --- AI benefits assistant (Decision Support) --------------------------------
+export type AssistantAnswerView = {
+  answer: string;
+  disclaimer: string;
+  suggestedQuestions: string[];
+  usedPlanCount: number;
+  coverageTier: string;
+};
+
+const ASSISTANT_DISCLAIMER =
+  "This assistant explains your options using your own plan data and cost estimates — it isn't medical, legal, or tax advice, and the estimates are a guide, not a guarantee. For a decision or anything not covered here, check with your HR team.";
+const ASSISTANT_SUGGESTED = [
+  "Which plan costs me the least overall?",
+  "What's the deductible on the recommended plan?",
+  "Which plans are HSA-eligible?",
+  "How much would I pay per paycheck?",
+];
+
+const usdMock = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+/**
+ * Grounded MOCK answerer for the demo (employee shell is mock-context). It answers off
+ * the SAME mock comparison the enrollment card shows — simple keyword routing over real
+ * mock numbers — so the panel is demoable without an LLM. Live mode calls the backend
+ * (askBenefitsAssistant), which grounds a real model on the employee's actual data.
+ */
+function mockAssistantAnswer(question: string, usage: "low" | "medium" | "high"): AssistantAnswerView {
+  const cmp = mockComparison(usage);
+  const plans = cmp.plans;
+  const rec = plans.find((p) => p.recommended) ?? plans[0];
+  const q = question.toLowerCase();
+  let answer: string;
+
+  if (!plans.length) {
+    answer = "I don't see any medical plans with rates to compare yet. Your HR team can confirm what's available for you.";
+  } else if (/hsa/.test(q)) {
+    const hsa = plans.filter((p) => p.hsaEligible).map((p) => p.planName);
+    answer = hsa.length
+      ? `${hsa.join(" and ")} ${hsa.length > 1 ? "are" : "is"} HSA-eligible — you can pair ${hsa.length > 1 ? "them" : "it"} with a tax-advantaged health savings account.`
+      : "None of your available medical plans are HSA-eligible.";
+  } else if (/deductible/.test(q)) {
+    answer = `Deductibles for your options: ${plans.map((p) => `${p.planName} ${usdMock(p.deductible ?? 0)}`).join(", ")}. The recommended ${rec.planName} has a ${usdMock(rec.deductible ?? 0)} deductible (estimate).`;
+  } else if (/month|paycheck|premium|per pay|pay ?check/.test(q)) {
+    answer = `Estimated premiums: ${plans.map((p) => `${p.planName} ${usdMock(p.monthlyPremium)}/mo`).join(", ")}. These are your share before any out-of-pocket costs.`;
+  } else if (/cheap|least|lowest|best|recommend|save|which plan/.test(q)) {
+    answer = `For ${usage} expected usage, ${rec.planName} has the lowest estimated total cost at about ${usdMock(rec.estimatedAnnualCost)}/yr${cmp.annualSavings ? `, roughly ${usdMock(cmp.annualSavings)}/yr less than the most expensive option` : ""}. That's an estimate for the assumed usage level.`;
+  } else {
+    answer = `Here's a quick read on your ${plans.length} medical option${plans.length > 1 ? "s" : ""} at ${usage} expected usage: ${plans
+      .map((p) => `${p.planName} ~${usdMock(p.estimatedAnnualCost)}/yr total`)
+      .join(", ")}. ${rec ? `${rec.planName} is the lowest estimated total cost.` : ""} Ask me about deductibles, premiums, or HSA eligibility.`;
+  }
+
+  return { answer, disclaimer: ASSISTANT_DISCLAIMER, suggestedQuestions: ASSISTANT_SUGGESTED, usedPlanCount: plans.length, coverageTier: cmp.coverageTier };
+}
+
+/**
+ * Ask the benefits assistant. Live (askBenefitsAssistant) when employer + plan year are
+ * live UUIDs and an employeeId is present; otherwise a grounded mock answer so the panel
+ * is always demoable. Returns a plain async callback — the page owns chat state.
+ */
+export function useBenefitsAssistant(employerId: string, planYearId: string, employeeId: string | null) {
+  const live = !!employeeId && resolvePlanYearScopedSource("askBenefitsAssistant", employerId, planYearId) === "live";
+  return {
+    live,
+    async ask(question: string, usage: "low" | "medium" | "high"): Promise<AssistantAnswerView> {
+      if (live) {
+        const r = (await runOperation(graphqlClient, operations.askBenefitsAssistant, {
+          employerId,
+          planYearId,
+          employeeId,
+          question,
+          usage,
+        })) as { askBenefitsAssistant: AssistantAnswerView };
+        return r.askBenefitsAssistant;
+      }
+      return mockAssistantAnswer(question, usage);
+    },
+  };
+}
