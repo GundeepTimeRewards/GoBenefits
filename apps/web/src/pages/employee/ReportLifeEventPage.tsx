@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/common";
 import { reportLifeEventSteps, lifeEventTypes, myDependents, myProfile, type LifeEventTypeDef } from "@/lib/employee-self-mock";
+import { useReportLifeEvent } from "@/lib/api/mutationHooks";
 
 type Icon = ComponentType<{ className?: string }>;
 const ICONS: Record<string, Icon> = {
@@ -23,7 +24,16 @@ const depName = (id: string) => {
   return d ? `${d.firstName} ${d.lastName}` : id;
 };
 
+// Wizard event keys → the per-customer life_event_type catalog keys the backend
+// validates against (seed 0002). Unmapped keys fall through to "other".
+const BACKEND_EVENT_KEY: Record<string, string> = {
+  marriage: "marriage", divorce: "divorce", birth: "birth_adoption", "loss-coverage": "loss_of_coverage",
+  "gain-coverage": "gain_of_coverage", death: "death_of_dependent", "aging-out": "dependent_eligibility_change",
+  address: "residence_change", employment: "employment_status_change", other: "other",
+};
+
 export function ReportLifeEventPage() {
+  const report = useReportLifeEvent();
   const [step, setStep] = useState(0);
   const [eventKey, setEventKey] = useState<string | null>(null);
   const [eventDate, setEventDate] = useState("");
@@ -46,7 +56,13 @@ export function ReportLifeEventPage() {
 
   const canContinue = step === 0 ? !!eventKey : step === 4 ? ack : true;
   const isLast = step === reportLifeEventSteps.length - 1;
-  const next = () => (isLast ? setSubmitted(true) : setStep((s) => s + 1));
+  const submit = () => {
+    report.mutate(
+      { eventType: eventKey ? (BACKEND_EVENT_KEY[eventKey] ?? "other") : "other", eventDate, notes: notes || undefined },
+      { onSuccess: () => setSubmitted(true) }
+    );
+  };
+  const next = () => (isLast ? submit() : setStep((s) => s + 1));
   const back = () => step > 0 && setStep((s) => s - 1);
   const togglePerson = (id: string) => setPeople((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -178,13 +194,14 @@ export function ReportLifeEventPage() {
             </CardContent>
           </Card>
 
+          {report.error && <p className="px-1 text-xs text-destructive">{report.error.message}</p>}
           {/* Buttons */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="ghost" size="sm" onClick={back} disabled={step === 0}><ArrowLeft className="mr-1.5 h-4 w-4" />Back</Button>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm"><Save className="mr-1.5 h-4 w-4" />Save Draft</Button>
               {isLast ? (
-                <Button size="sm" disabled={!canContinue} onClick={next}><Send className="mr-1.5 h-4 w-4" />Submit Request</Button>
+                <Button size="sm" disabled={!canContinue || report.isPending} onClick={next}><Send className="mr-1.5 h-4 w-4" />{report.isPending ? "Submitting…" : "Submit Request"}</Button>
               ) : (
                 <Button size="sm" disabled={!canContinue} onClick={next}>Continue <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
               )}

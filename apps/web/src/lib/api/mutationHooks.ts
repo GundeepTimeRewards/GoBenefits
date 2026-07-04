@@ -462,3 +462,18 @@ export function useUploadDocument(employerId: string) {
 export function useRequestSignature(employerId: string) {
   return useGatedMutation<{ documentId: string }>("requestSignature", employerId, DOCUMENT_MUT_READS);
 }
+
+// --- Employee self-service life event (FE-polish; Phase E-4 backend) --------------
+// Identity-scoped: NO employerId (the backend resolves the caller's employer +
+// employee row from their account). Gated on the mode/endpoint only.
+import type { ReportLifeEventArgs } from "./operations";
+
+export function useReportLifeEvent() {
+  return useMutation<MutationResult<unknown>, FormMutationError, ReportLifeEventArgs>({
+    mutationFn: async (args) => {
+      if (resolveDataSource("reportLifeEvent") !== "live") return { live: false, data: null };
+      const data = await runLive(() => runOperation(graphqlClient, operations.reportLifeEvent, args));
+      return { live: true, data };
+    },
+  });
+}

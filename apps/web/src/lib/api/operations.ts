@@ -113,6 +113,7 @@ export type PayrollRowInput = { employeeNumber: string; hours: number; wages?: n
 export type ImportPayrollArgs = { employerId: string; input: { source: string; fileName?: string; periodStart: string; periodEnd: string; payDate?: string; rows: PayrollRowInput[] } };
 export type UploadDocumentArgs = { employerId: string; planYearId: string; category: string; name: string; planId?: string };
 export type RequestSignatureArgs = { employerId: string; documentId: string };
+export type ReportLifeEventArgs = { eventType: string; eventDate: string; notes?: string };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -356,6 +357,12 @@ const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!,
 }`;
 
 // Compliance workspace (Phase F-4): ACA/ALE + affordability + 1095-C + COBRA + notices.
+const REPORT_LIFE_EVENT = `mutation ReportLifeEvent($input: ReportLifeEventInput!) {
+  reportLifeEvent(input: $input) { id type date status documents }
+}`;
+const EMPLOYEE_LIFE_EVENTS = `query EmployeeLifeEvents {
+  employeeLifeEvents { employeeId events { id type date status documents } }
+}`;
 const UPLOAD_DOCUMENT = `mutation UploadDocument($employerId: ID!, $planYearId: ID!, $category: String!, $name: String!, $planId: ID) {
   uploadDocument(employerId: $employerId, planYearId: $planYearId, category: $category, name: $name, planId: $planId) { documentId name category status }
 }`;
@@ -472,6 +479,8 @@ export const operations = {
   openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
   documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  reportLifeEvent: { name: "reportLifeEvent", kind: "mutation", document: REPORT_LIFE_EVENT, buildVariables: (a: ReportLifeEventArgs) => ({ input: compact({ eventType: a.eventType, eventDate: a.eventDate, notes: a.notes }) }) } as C1Operation<ReportLifeEventArgs, unknown>,
+  employeeLifeEvents: { name: "employeeLifeEvents", kind: "query", document: EMPLOYEE_LIFE_EVENTS, buildVariables: () => ({}) } as C1Operation<void, unknown>,
   uploadDocument: { name: "uploadDocument", kind: "mutation", document: UPLOAD_DOCUMENT, buildVariables: (a: UploadDocumentArgs) => compact({ employerId: a.employerId, planYearId: a.planYearId, category: a.category, name: a.name, planId: a.planId }) } as C1Operation<UploadDocumentArgs, unknown>,
   requestSignature: { name: "requestSignature", kind: "mutation", document: REQUEST_SIGNATURE, buildVariables: (a: RequestSignatureArgs) => ({ employerId: a.employerId, documentId: a.documentId }) } as C1Operation<RequestSignatureArgs, unknown>,
   payrollDataWorkspace: { name: "payrollDataWorkspace", kind: "query", document: PAYROLL_DATA_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
