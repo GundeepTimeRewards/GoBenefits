@@ -5,7 +5,7 @@ import { getPayroll, getCarrierExports, getPayrollWorkspace } from "@/lib/mock/d
 import { resolvePlanYearScopedSource } from "./dataSource";
 import { graphqlClient } from "./client";
 import { operations, runOperation } from "./operations";
-import { mapDeductionsWorkspace, type LiveDeductionsWorkspace, type DeductionsWorkspaceView } from "./liveMappers";
+import { mapDeductionsWorkspace, mapPayrollDataWorkspace, type LiveDeductionsWorkspace, type DeductionsWorkspaceView } from "./liveMappers";
 
 export function usePayrollDeductions(employerId: string) {
   return useQuery({ queryKey: ["payroll", employerId], queryFn: () => getPayroll(employerId) });
@@ -44,6 +44,28 @@ export function useDeductionsWorkspace(employerId: string, planYearId: string) {
             deductionChanges: ws.deductionChanges,
             exportBatches: ws.exportBatches,
           };
+        },
+  });
+}
+
+/**
+ * Payroll Data workspace (FE-polish; §10.5 hook split). Live when employer + plan year
+ * are live UUIDs; otherwise the shared getPayrollWorkspace getter's fields.
+ */
+export function usePayrollDataWorkspace(employerId: string, planYearId: string) {
+  const live = resolvePlanYearScopedSource("payrollDataWorkspace", employerId, planYearId) === "live";
+  return useQuery({
+    queryKey: ["payrollDataWorkspace", live ? "live" : "mock", employerId, planYearId],
+    queryFn: live
+      ? async () => {
+          const r = (await runOperation(graphqlClient, operations.payrollDataWorkspace, { employerId, planYearId })) as {
+            payrollDataWorkspace: Parameters<typeof mapPayrollDataWorkspace>[0];
+          };
+          return mapPayrollDataWorkspace(r.payrollDataWorkspace);
+        }
+      : () => {
+          const ws = getPayrollWorkspace(employerId, planYearId);
+          return { readOnly: ws.readOnly, connection: ws.connection, importSummary: ws.importSummary, readiness: ws.readiness, aca: ws.aca, payPeriods: ws.payPeriods, employeeRecords: ws.employeeRecords, settings: ws.settings };
         },
   });
 }

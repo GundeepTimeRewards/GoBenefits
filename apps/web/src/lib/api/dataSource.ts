@@ -70,6 +70,10 @@ export const C1_LIVE_CAPABLE = new Set<string>([
   "openElectionWindow",
   "documentWorkspace", // Phase E-3 (plan-year-scoped read)
   "generateConfirmations",
+  "payrollDataWorkspace", // FE-polish (Phase E-5 backend; employer-only)
+  "importPayrollData",
+  "syncPayrollProvider",
+  "runAcaLookback",
   "complianceWorkspace", // Phase F-4 (plan-year-scoped read: ACA/COBRA/notices)
   "calculateAleStatus",
   "generate1095c",

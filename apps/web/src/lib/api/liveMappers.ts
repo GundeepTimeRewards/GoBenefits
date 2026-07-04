@@ -602,3 +602,48 @@ export function mapComplianceWorkspace(v: LiveCompliance): ComplianceView {
     filingStatus: v.filingStatus ?? "In Preparation",
   };
 }
+
+// --- Payroll Data workspace (FE-polish; Phase E-5 backend) -----------------------
+import type {
+  PayrollWorkspace as MockPayrollDataWorkspace, ImportedPayPeriod as MockPeriod,
+  EmployeePayrollRecord as MockEmpRecord, PayPeriodStatus, PayrollAcaStatus,
+} from "@/lib/mock/db";
+
+type LivePayrollData = {
+  readOnly: boolean;
+  connection: MockPayrollDataWorkspace["connection"];
+  importSummary: MockPayrollDataWorkspace["importSummary"];
+  readiness: MockPayrollDataWorkspace["readiness"];
+  aca: MockPayrollDataWorkspace["aca"];
+  payPeriods: { id: string; period: string; payDate: string | null; group: string | null; employees: number; hours: string; wages: string; status: string; issues: number; source: string }[];
+  employeeRecords: { id: string; name: string; employeeNumber: string | null; group: string | null; matchedCensus: string; hours: string; wages: string; aca: string; issues: string | null; lastImported: string | null }[];
+  settings: MockPayrollDataWorkspace["settings"];
+};
+
+// The Payroll Data page reads only these five workspace groups (§10.5 hook split).
+export type PayrollDataView = Pick<MockPayrollDataWorkspace, "connection" | "importSummary" | "readiness" | "aca" | "payPeriods" | "employeeRecords" | "settings" | "readOnly">;
+
+const PERIOD_STATUS: Record<string, PayPeriodStatus> = { imported: "Imported", staged: "Needs Review", failed: "Failed" };
+const dash = (v: string | null | undefined) => (v == null || v === "" ? "—" : v);
+
+export function mapPayrollDataWorkspace(v: LivePayrollData): PayrollDataView {
+  return {
+    readOnly: v.readOnly,
+    connection: v.connection,
+    importSummary: v.importSummary,
+    readiness: v.readiness,
+    aca: v.aca,
+    settings: v.settings,
+    payPeriods: v.payPeriods.map((p): MockPeriod => ({
+      id: p.id, period: p.period, payDate: dash(p.payDate), group: dash(p.group),
+      emps: p.employees, hours: p.hours, wages: p.wages,
+      status: (PERIOD_STATUS[p.status] ?? "Needs Review") as PayPeriodStatus, issues: p.issues, source: p.source,
+    })),
+    employeeRecords: v.employeeRecords.map((e): MockEmpRecord => ({
+      id: e.id, name: e.name, empNumber: dash(e.employeeNumber), group: dash(e.group),
+      matchedCensus: e.matchedCensus, hours: e.hours, wages: e.wages,
+      aca: (e.aca.startsWith("Full-time") ? "Full-Time" : e.aca.startsWith("Not full-time") ? "Not Full-Time" : "Unknown") as PayrollAcaStatus,
+      issues: dash(e.issues), lastImported: dash(e.lastImported),
+    })),
+  };
+}

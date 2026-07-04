@@ -109,6 +109,8 @@ export type MapDeductionCodeArgs = { employerId: string; deductionId: string; co
 export type LifeEventCaseArgs = { employerId: string; caseId: string };
 export type DenyLifeEventArgs = LifeEventCaseArgs & { reason?: string };
 export type ReconcileBatchArgs = { employerId: string; batchId: string };
+export type PayrollRowInput = { employeeNumber: string; hours: number; wages?: number };
+export type ImportPayrollArgs = { employerId: string; input: { source: string; fileName?: string; periodStart: string; periodEnd: string; payDate?: string; rows: PayrollRowInput[] } };
 
 // --- Documents ---------------------------------------------------------------
 const ME = `query Me { me { userId role agencyId email employerId } }`;
@@ -352,6 +354,27 @@ const GENERATE_CONFIRMATIONS = `mutation GenerateConfirmations($employerId: ID!,
 }`;
 
 // Compliance workspace (Phase F-4): ACA/ALE + affordability + 1095-C + COBRA + notices.
+const PAYROLL_DATA_WORKSPACE = `query PayrollDataWorkspace($employerId: ID!, $planYearId: ID!) {
+  payrollDataWorkspace(employerId: $employerId, planYearId: $planYearId) {
+    readOnly
+    connection { provider frequency currentGroup firstImported lastImported measurementPeriod stabilityPeriod lastSync nextSync dataSource connected lookbackReady }
+    importSummary { importedPayPeriods matchedEmployees unmatchedEmployees lastSyncStatus }
+    readiness { percent issues { key label count tone } }
+    aca { measurementPeriod stabilityPeriod administrativePeriod calcStatus lastCalculated fullTimeDeterminationStatus affordabilityStatus form1095Status }
+    payPeriods { id period payDate group employees hours wages status issues source }
+    employeeRecords { id name employeeNumber group matchedCensus hours wages aca issues lastImported }
+    settings { provider frequency deductionSchedule payrollGroups codeMapping syncSettings exportFormat }
+  }
+}`;
+const IMPORT_PAYROLL_DATA = `mutation ImportPayrollData($employerId: ID!, $input: ImportPayrollInput!) {
+  importPayrollData(employerId: $employerId, input: $input) { jobId status }
+}`;
+const SYNC_PAYROLL_PROVIDER = `mutation SyncPayrollProvider($employerId: ID!) {
+  syncPayrollProvider(employerId: $employerId) { jobId status }
+}`;
+const RUN_ACA_LOOKBACK = `mutation RunAcaLookback($employerId: ID!, $planYearId: ID!) {
+  runAcaLookback(employerId: $employerId, planYearId: $planYearId) { jobId status }
+}`;
 const COMPLIANCE_WORKSPACE = `query ComplianceWorkspace($employerId: ID!, $planYearId: ID!) {
   complianceWorkspace(employerId: $employerId, planYearId: $planYearId) {
     complianceYear filingStatus
@@ -441,6 +464,10 @@ export const operations = {
   openElectionWindow: { name: "openElectionWindow", kind: "mutation", document: OPEN_ELECTION_WINDOW, buildVariables: (a: LifeEventCaseArgs) => ({ employerId: a.employerId, caseId: a.caseId }) } as C1Operation<LifeEventCaseArgs, unknown>,
   documentWorkspace: { name: "documentWorkspace", kind: "query", document: DOCUMENT_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   generateConfirmations: { name: "generateConfirmations", kind: "mutation", document: GENERATE_CONFIRMATIONS, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  payrollDataWorkspace: { name: "payrollDataWorkspace", kind: "query", document: PAYROLL_DATA_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
+  importPayrollData: { name: "importPayrollData", kind: "mutation", document: IMPORT_PAYROLL_DATA, buildVariables: (a: ImportPayrollArgs) => ({ employerId: a.employerId, input: compact(a.input) }) } as C1Operation<ImportPayrollArgs, unknown>,
+  syncPayrollProvider: { name: "syncPayrollProvider", kind: "mutation", document: SYNC_PAYROLL_PROVIDER, buildVariables: (a: { employerId: string }) => ({ employerId: a.employerId }) } as C1Operation<{ employerId: string }, unknown>,
+  runAcaLookback: { name: "runAcaLookback", kind: "mutation", document: RUN_ACA_LOOKBACK, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   complianceWorkspace: { name: "complianceWorkspace", kind: "query", document: COMPLIANCE_WORKSPACE, buildVariables: (a: PlanYearScopedArgs) => ({ employerId: a.employerId, planYearId: a.planYearId }) } as C1Operation<PlanYearScopedArgs, unknown>,
   calculateAleStatus: { name: "calculateAleStatus", kind: "mutation", document: CALCULATE_ALE_STATUS, buildVariables: (a: { employerId: string; complianceYear: number }) => ({ employerId: a.employerId, complianceYear: a.complianceYear }) } as C1Operation<{ employerId: string; complianceYear: number }, unknown>,
   generate1095c: { name: "generate1095c", kind: "mutation", document: GENERATE_1095C, buildVariables: (a: { employerId: string; complianceYear: number }) => ({ employerId: a.employerId, complianceYear: a.complianceYear }) } as C1Operation<{ employerId: string; complianceYear: number }, unknown>,
